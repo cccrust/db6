@@ -5,6 +5,7 @@ use crate::sql::parser::ast::{Expr, SelectStmt};
 #[derive(Debug, Clone)]
 pub enum Plan {
     Scan(ScanPlan),
+    Join(JoinPlan),
     Insert(InsertPlan),
     Update(UpdatePlan),
     Delete(DeletePlan),
@@ -22,6 +23,14 @@ pub struct ScanPlan {
     pub limit: Option<i64>,
     pub is_fts: bool,
     pub fts_query: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JoinPlan {
+    pub left: Box<Plan>,
+    pub right: Box<Plan>,
+    pub kind: String,
+    pub condition: Option<Expr>,
 }
 
 #[derive(Debug, Clone)]
