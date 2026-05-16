@@ -254,7 +254,7 @@ impl<'a> DeleteQuery<'a> {
         self
     }
 
-    pub fn where_(&mut self, condition: &str) -> &mut Self {
+    pub fn filter(&mut self, condition: &str) -> &mut Self {
         self.where_clause = Some(condition.to_string());
         self
     }
@@ -294,7 +294,7 @@ impl<'a> UpdateQuery<'a> {
         self
     }
 
-    pub fn where_(&mut self, condition: &str) -> &mut Self {
+    pub fn filter(&mut self, condition: &str) -> &mut Self {
         self.where_clause = Some(condition.to_string());
         self
     }
@@ -386,9 +386,13 @@ impl<'a> SelectQuery<'a> {
         self
     }
 
-    pub fn where_(&mut self, condition: &str) -> &mut Self {
+    pub fn filter(&mut self, condition: &str) -> &mut Self {
         self.where_clause = Some(condition.to_string());
         self
+    }
+
+    pub fn where_(&mut self, condition: &str) -> &mut Self {
+        self.filter(condition)
     }
 
     pub fn order_by(&mut self, field: &str) -> &mut Self {
@@ -577,8 +581,14 @@ fn apply_group_by(rows: Vec<(Vec<u8>, Vec<u8>)>, group_field: &str, columns: &st
 /// Filter rows based on WHERE condition
 /// Supports: key = value, key > value, key >= value, key < value, key <= value, key != value, key LIKE pattern
 /// Supports AND/OR combinations: "value = Bob AND key > 1" or "value = Bob OR key < 3"
+/// Supports JSON path: "$.field > 25" (filters JSON in value column)
 fn filter_rows(rows: Vec<(Vec<u8>, Vec<u8>)>, condition: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
     let condition = condition.trim();
+
+    // Check for JSON path condition (starts with $)
+    if condition.starts_with("$.") || condition.starts_with("$[") {
+        return filter_json_path(rows, condition);
+    }
 
     // Check for AND/OR operators
     let has_and = condition.contains(" AND ");
@@ -658,6 +668,193 @@ fn filter_single_condition(rows: Vec<(Vec<u8>, Vec<u8>)>, condition: &str) -> Ve
     }).collect()
 }
 
+/// Filter rows based on JSON path condition
+/// Syntax: "$.field op value" or "$.nested.field op value"
+/// Example: "$.age > 25" filters rows where JSON value's age > 25
+fn filter_json_path(rows: Vec<(Vec<u8>, Vec<u8>)>, condition: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let condition = condition.trim();
+
+    // Parse: "$.path op value" or "$.path[0] op value"
+    // Examples:
+    //   "$.age > 25"
+    //   "$.name = 'Alice'"
+    //   "$.address.city = 'Taipei'"
+
+    // Find the operator and split
+    let (path, op, value_str) = parse_json_condition(condition);
+
+    rows.into_iter().filter(|(k, v)| {
+        let json_str = String::from_utf8_lossy(v);
+
+        // Parse JSON
+        let json: serde_json::Value = match serde_json::from_str(&json_str) {
+            Ok(j) => j,
+            Err(_) => return false,
+        };
+
+        // Extract value at path
+        let json_value = json_path_get(&json, &path);
+
+        match json_value {
+            Some(jv) => {
+                let jv_str = jv.to_string();
+
+                // Remove surrounding quotes for string comparison
+                let compare_val = value_str.trim_matches(|c| c == '\'' || c == '"');
+                let compare_with = jv_str.trim_matches('"');
+
+                match op.as_str() {
+                    "=" | "==" => compare_with == compare_val,
+                    "!=" => compare_with != compare_val,
+                    ">" => {
+                        // Try numeric comparison first
+                        if let (Ok(a), Ok(b)) = (compare_with.parse::<f64>(), compare_val.parse::<f64>()) {
+                            a > b
+                        } else {
+                            compare_with > compare_val
+                        }
+                    }
+                    ">=" => {
+                        if let (Ok(a), Ok(b)) = (compare_with.parse::<f64>(), compare_val.parse::<f64>()) {
+                            a >= b
+                        } else {
+                            compare_with >= compare_val
+                        }
+                    }
+                    "<" => {
+                        if let (Ok(a), Ok(b)) = (compare_with.parse::<f64>(), compare_val.parse::<f64>()) {
+                            a < b
+                        } else {
+                            compare_with < compare_val
+                        }
+                    }
+                    "<=" => {
+                        if let (Ok(a), Ok(b)) = (compare_with.parse::<f64>(), compare_val.parse::<f64>()) {
+                            a <= b
+                        } else {
+                            compare_with <= compare_val
+                        }
+                    }
+                    "LIKE" => {
+                        if compare_val.starts_with('%') && compare_val.ends_with('%') {
+                            compare_with.contains(&compare_val[1..compare_val.len()-1])
+                        } else if compare_val.ends_with('%') {
+                            compare_with.starts_with(&compare_val[..compare_val.len()-1])
+                        } else if compare_val.starts_with('%') {
+                            compare_with.ends_with(&compare_val[1..])
+                        } else {
+                            compare_with == compare_val
+                        }
+                    }
+                    _ => false,
+                }
+            }
+            None => false,
+        }
+    }).collect()
+}
+
+/// Parse "$.path op value" into (path, op, value)
+fn parse_json_condition(condition: &str) -> (String, String, String) {
+    let condition = condition.trim();
+
+    // Find the first whitespace which separates path from operator
+    let mut path_end = condition.len();
+    let mut in_string = false;
+    let mut paren_depth = 0;
+
+    for (i, c) in condition.char_indices() {
+        match c {
+            '\'' | '"' if !in_string => in_string = true,
+            '\'' | '"' if in_string => in_string = false,
+            '(' | '[' | '{' if !in_string => paren_depth += 1,
+            ')' | ']' | '}' if !in_string && paren_depth > 0 => paren_depth -= 1,
+            ' ' | '\t' if !in_string && paren_depth == 0 => {
+                path_end = i;
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let path = condition[..path_end].to_string();
+    let rest = condition[path_end..].trim();
+
+    // Parse operator and value
+    let parts: Vec<&str> = rest.split_whitespace().collect();
+    if parts.len() < 2 {
+        return (path, "=".to_string(), "".to_string());
+    }
+
+    let op = parts[0].to_string();
+    let value = parts[1..].join(" ");
+
+    (path, op, value)
+}
+
+/// Get JSON value at path (e.g., "$.name" or "$.address.city" or "$[0]")
+fn json_path_get(json: &serde_json::Value, path: &str) -> Option<serde_json::Value> {
+    let path = path.trim();
+    let path = path.strip_prefix('$')?;
+    let path = path.trim_start_matches('.');
+
+    if path.is_empty() {
+        return Some(json.clone());
+    }
+
+    let mut current = json;
+    let segments: Vec<&str> = path.split('.').collect();
+
+    for (i, segment) in segments.iter().enumerate() {
+        let is_last = i == segments.len() - 1;
+
+        // Check for array index like "[0]"
+        if let Some(idx_start) = segment.find('[') {
+            let field = &segment[..idx_start];
+            let rest = &segment[idx_start..];
+
+            if !field.is_empty() {
+                if let Some(obj) = current.get(field) {
+                    current = obj;
+                } else {
+                    return None;
+                }
+            }
+
+            // Parse array index
+            for arr_match in rest.match_indices('[') {
+                let idx_str = &rest[arr_match.0 + 1..];
+                if let Some(idx_end) = idx_str.find(']') {
+                    let idx: usize = match idx_str[..idx_end].parse() {
+                        Ok(i) => i,
+                        Err(_) => return None,
+                    };
+                    if let Some(arr) = current.as_array() {
+                        if idx >= arr.len() {
+                            return None;
+                        }
+                        current = &arr[idx];
+                    } else {
+                        return None;
+                    }
+                }
+            }
+        } else if is_last {
+            // Last segment - return the value
+            return current.get(segment).cloned();
+        } else {
+            // Not last segment - descend
+            if let Some(next) = current.get(segment) {
+                current = next;
+            } else {
+                return None;
+            }
+        }
+    }
+
+    Some(current.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -721,7 +918,7 @@ mod tests {
         // WHERE value = Bob
         let result = db.select("key, value")
             .from("users")
-            .where_("value = Bob")
+            .filter("value = Bob")
             .execute()
             .unwrap();
 
@@ -739,7 +936,7 @@ mod tests {
         // DELETE where value = Bob
         let count = db.delete()
             .from("users")
-            .where_("value = Bob")
+            .filter("value = Bob")
             .execute()
             .unwrap();
 
@@ -758,7 +955,7 @@ mod tests {
         // UPDATE users SET value = "Robert" where value = "Bob"
         let count = db.update("users")
             .set_value("Robert")
-            .where_("value = Bob")
+            .filter("value = Bob")
             .execute()
             .unwrap();
 
@@ -813,7 +1010,7 @@ mod tests {
         // WHERE key = 2 AND value = Bob
         let result = db.select("key, value")
             .from("users")
-            .where_("key = 2 AND value = Bob")
+            .filter("key = 2 AND value = Bob")
             .execute()
             .unwrap();
 
@@ -832,7 +1029,7 @@ mod tests {
         // WHERE key = 1 OR value = Charlie
         let result = db.select("key, value")
             .from("users")
-            .where_("key = 1 OR value = Charlie")
+            .filter("key = 1 OR value = Charlie")
             .execute()
             .unwrap();
 
@@ -1096,5 +1293,85 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_json_path_numeric() {
+        let mut db = Db::new("memory").unwrap();
+        db.table("users").put(b"1", r#"{"name":"Alice","age":30}"#.as_bytes()).unwrap();
+        db.table("users").put(b"2", r#"{"name":"Bob","age":25}"#.as_bytes()).unwrap();
+        db.table("users").put(b"3", r#"{"name":"Charlie","age":35}"#.as_bytes()).unwrap();
+
+        let result = db.select("*")
+            .from("users")
+            .filter("$.age > 25")
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_json_path_string() {
+        let mut db = Db::new("memory").unwrap();
+        db.table("users").put(b"1", r#"{"name":"Alice"}"#.as_bytes()).unwrap();
+        db.table("users").put(b"2", r#"{"name":"Bob"}"#.as_bytes()).unwrap();
+
+        let result = db.select("*")
+            .from("users")
+            .filter("$.name = 'Alice'")
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0][0], "1");
+    }
+
+    #[test]
+    fn test_json_path_nested() {
+        let mut db = Db::new("memory").unwrap();
+        db.table("users").put(b"1", r#"{"address":{"city":"Taipei"}}"#.as_bytes()).unwrap();
+        db.table("users").put(b"2", r#"{"address":{"city":"Kaohsiung"}}"#.as_bytes()).unwrap();
+
+        let result = db.select("*")
+            .from("users")
+            .filter("$.address.city = 'Taipei'")
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0][0], "1");
+    }
+
+    #[test]
+    fn test_json_path_like() {
+        let mut db = Db::new("memory").unwrap();
+        db.table("users").put(b"1", r#"{"name":"Alice"}"#.as_bytes()).unwrap();
+        db.table("users").put(b"2", r#"{"name":"Andrew"}"#.as_bytes()).unwrap();
+
+        let result = db.select("*")
+            .from("users")
+            .filter("$.name LIKE 'Ali%'")
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0][0], "1");
+    }
+
+    #[test]
+    fn test_json_path_not_equal() {
+        let mut db = Db::new("memory").unwrap();
+        db.table("users").put(b"1", r#"{"name":"Alice","active":true}"#.as_bytes()).unwrap();
+        db.table("users").put(b"2", r#"{"name":"Bob","active":false}"#.as_bytes()).unwrap();
+
+        let result = db.select("*")
+            .from("users")
+            .filter("$.active != false")
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0][0], "1");
     }
 }

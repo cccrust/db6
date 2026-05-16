@@ -43,7 +43,7 @@
 * sqlite 的功能，目前有哪些重要卻沒有放入本系統 sql 中的？
 * 利用 kv/ ，仿照 redis 加入 message queue 的功能
     * 放在 msgq/ 下
-* Fluent Interface	語法風格: query/ 模組
+* [x] Fluent Interface	語法風格: query/ 模組
     * 連續點點點（Method Chaining）的設計模式	db.select().where().hidden()
     * sql 語法經常被 mapping 為 Fluent Interface 語法風格
     * kv 的 query ，也能被 db.select().where() 這樣的語法延伸使用。
