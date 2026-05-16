@@ -310,3 +310,4 @@ impl crate::engine::CanScan for BTreeEngine {}
 impl crate::engine::CanBatch for BTreeEngine {}
 impl crate::engine::CanFts for BTreeEngine {}
 impl crate::engine::CanTransaction for BTreeEngine {}
+impl crate::engine::CanGroupBy for BTreeEngine {}

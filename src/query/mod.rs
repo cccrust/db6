@@ -329,35 +329,58 @@ impl<'a> SelectQuery<'a> {
         self
     }
 
+    /// Check if engine supports GROUP BY
+    fn requires_group_by_capability(&self) -> Result<()> {
+        let engine_type = self.db.as_ref()
+            .map(|db| db.engine.engine_type())
+            .unwrap_or("unknown");
+
+        match engine_type {
+            "memory-btree" | "btree" => Ok(()),
+            _ => Err(Error::NotSupported(format!(
+                "GROUP BY is not supported for {} engine. Use btree or memory-btree engine.",
+                engine_type
+            ))),
+        }
+    }
+
     /// Execute query
     pub fn execute(&mut self) -> Result<ResultSet> {
+        // Check GROUP BY capability BEFORE taking db
+        if let Some(ref group_field) = self.group_by {
+            self.requires_group_by_capability()?;
+        }
+
         let db = self.db.take().ok_or_else(|| Error::Sql("DB not available".into()))?;
-        
+
         let table_name = self.from.as_ref()
             .ok_or_else(|| Error::Sql("No table specified".into()))?;
-        
+
         let table_id = db.get_table_id(table_name);
-        
+
         // Scan all data
         let mut rows = db.engine.scan(table_id, b"", b"")?;
-        
+
         // Apply WHERE filtering
         if let Some(ref where_cond) = self.where_clause {
             rows = filter_rows(rows, where_cond);
         }
-        
-        // Apply ORDER BY
-        if let Some(ref order) = self.order_by {
-            if db.engine.engine_type() != "memory-hash" {
-                rows.sort_by(|a, b| a.0.cmp(&b.0));
-            }
+
+        // Apply GROUP BY
+        if let Some(ref group_field) = self.group_by {
+            rows = apply_group_by(rows, group_field, &self.columns)?;
         }
-        
+
+        // Apply ORDER BY
+        if self.order_by.is_some() && db.engine.engine_type() != "memory-hash" {
+            rows.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+
         // Apply LIMIT
         if let Some(limit) = self.limit {
             rows.truncate(limit);
         }
-        
+
         // Build result
         let columns: Vec<String> = if self.columns == "*" {
             vec!["key".to_string(), "value".to_string()]
@@ -366,7 +389,7 @@ impl<'a> SelectQuery<'a> {
                 .map(|s| s.trim().to_string())
                 .collect()
         };
-        
+
         let result_rows: Vec<Vec<String>> = rows.iter()
             .map(|(k, v)| {
                 if columns.len() == 1 && columns[0] == "key" {
@@ -381,13 +404,72 @@ impl<'a> SelectQuery<'a> {
                 }
             })
             .collect();
-        
+
         Ok(ResultSet {
             columns,
             rows: result_rows,
             affected: 0,
         })
     }
+}
+
+/// Apply GROUP BY with aggregate functions
+fn apply_group_by(rows: Vec<(Vec<u8>, Vec<u8>)>, group_field: &str, columns: &str) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+    use std::collections::HashMap;
+
+    let mut groups: HashMap<String, Vec<(Vec<u8>, Vec<u8>)>> = HashMap::new();
+
+    for (k, v) in rows {
+        let group_key = if group_field == "key" {
+            String::from_utf8_lossy(&k).to_string()
+        } else {
+            String::from_utf8_lossy(&v).to_string()
+        };
+
+        groups.entry(group_key).or_insert_with(Vec::new).push((k, v));
+    }
+
+    let mut result: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+
+    for (group_key, group_rows) in groups {
+        // Determine which aggregate function to use based on columns
+        let value = if columns.contains("COUNT(*)") || columns.contains("count(*)") {
+            group_rows.len().to_string()
+        } else if columns.contains("SUM(") || columns.contains("sum(") {
+            // Try to sum numeric values
+            let sum: f64 = group_rows.iter()
+                .filter_map(|(_, v)| String::from_utf8_lossy(v).parse::<f64>().ok())
+                .sum();
+            sum.to_string()
+        } else if columns.contains("AVG(") || columns.contains("avg(") {
+            let sum: f64 = group_rows.iter()
+                .filter_map(|(_, v)| String::from_utf8_lossy(v).parse::<f64>().ok())
+                .sum();
+            let count = group_rows.len() as f64;
+            if count > 0.0 {
+                (sum / count).to_string()
+            } else {
+                "0".to_string()
+            }
+        } else if columns.contains("MIN(") || columns.contains("min(") {
+            group_rows.iter()
+                .filter_map(|(_, v)| String::from_utf8_lossy(v).parse::<f64>().ok())
+                .fold(f64::INFINITY, f64::min)
+                .to_string()
+        } else if columns.contains("MAX(") || columns.contains("max(") {
+            group_rows.iter()
+                .filter_map(|(_, v)| String::from_utf8_lossy(v).parse::<f64>().ok())
+                .fold(f64::NEG_INFINITY, f64::max)
+                .to_string()
+        } else {
+            // Default: return first value in group
+            String::from_utf8_lossy(&group_rows[0].1).to_string()
+        };
+
+        result.push((group_key.into_bytes(), value.into_bytes()));
+    }
+
+    Ok(result)
 }
 
 /// Filter rows based on WHERE condition
@@ -656,5 +738,41 @@ mod tests {
         let keys: Vec<&str> = result.rows.iter().map(|r| r[0].as_str()).collect();
         assert!(keys.contains(&"1"));
         assert!(keys.contains(&"3"));
+    }
+
+    #[test]
+    fn test_group_by_basic() {
+        let mut db = Db::new("btree").unwrap();
+        // Simulate grouped data - multiple rows with same "group" value stored as value
+        db.table("users").put(b"1", b"10").unwrap();
+        db.table("users").put(b"2", b"20").unwrap();
+        db.table("users").put(b"3", b"10").unwrap();
+        db.table("users").put(b"4", b"20").unwrap();
+        db.table("users").put(b"5", b"10").unwrap();
+
+        // GROUP BY value - count occurrences
+        let result = db.select("COUNT(*), value")
+            .from("users")
+            .group_by("value")
+            .execute()
+            .unwrap();
+
+        // Should have 2 groups: value=10 (count 3) and value=20 (count 2)
+        assert_eq!(result.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_group_by_not_supported_on_memory() {
+        let mut db = Db::new("memory").unwrap();
+        db.table("users").put(b"1", b"Alice").unwrap();
+
+        let result = db.select("COUNT(*), value")
+            .from("users")
+            .group_by("value")
+            .execute();
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("GROUP BY is not supported"));
     }
 }

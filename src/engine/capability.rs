@@ -23,6 +23,9 @@ pub trait CanScan: StorageEngine {}
 /// Marker trait for engines that support batch operations
 pub trait CanBatch: StorageEngine {}
 
+/// Marker trait for engines that support GROUP BY and aggregate functions
+pub trait CanGroupBy: StorageEngine {}
+
 /// Helper macro to implement capabilities for an engine
 #[macro_export]
 macro_rules! impl_capabilities {

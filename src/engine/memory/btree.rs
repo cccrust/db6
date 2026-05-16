@@ -284,3 +284,4 @@ impl crate::engine::CanOrderBy for BTreeMemoryEngine {}
 impl crate::engine::CanScan for BTreeMemoryEngine {}
 impl crate::engine::CanBatch for BTreeMemoryEngine {}
 impl crate::engine::CanFts for BTreeMemoryEngine {}
+impl crate::engine::CanGroupBy for BTreeMemoryEngine {}
