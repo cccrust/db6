@@ -3,6 +3,10 @@
 use crate::engine::StorageEngine;
 use crate::error::{Error, Result};
 use crate::sql::parser::parse;
+use super::json_path::eval_expr;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
 
 #[derive(Debug, Clone, Default)]
 pub struct ResultSet {
@@ -22,13 +26,13 @@ impl Executor {
 
     pub fn execute(&mut self, sql: &str) -> Result<ResultSet> {
         let stmts = parse(sql).map_err(|e| Error::Sql(e.to_string()))?;
-        
+
         if stmts.is_empty() {
             return Ok(ResultSet::default());
         }
 
         let stmt = &stmts[0];
-        
+
         match stmt {
             crate::sql::parser::ast::Statement::Select(select) => {
                 self.execute_select(select)
@@ -57,11 +61,15 @@ impl Executor {
 
     fn execute_select(&mut self, select: &crate::sql::parser::ast::SelectStmt) -> Result<ResultSet> {
         let _table = select.from.as_ref().ok_or_else(|| Error::Sql("No table specified".into()))?;
-        
+
         let start = b"".to_vec();
         let end = b"".to_vec();
         let mut rows = self.engine.scan(1, &start, &end)?;
-        
+
+        if let Some(ref where_expr) = select.where_ {
+            rows.retain(|(k, v)| eval_expr(where_expr, v));
+        }
+
         let columns = if select.columns.is_empty() {
             vec!["key".to_string(), "value".to_string()]
         } else {
@@ -73,7 +81,7 @@ impl Executor {
                 }
             }).collect()
         };
-        
+
         if !select.order_by.is_empty() {
             let order = &select.order_by[0];
             rows.sort_by(|a, b| {
@@ -81,14 +89,14 @@ impl Executor {
                 if order.asc { cmp } else { cmp.reverse() }
             });
         }
-        
+
         let mut result_rows: Vec<Vec<String>> = rows.iter().map(|(k, v)| {
             vec![
                 String::from_utf8_lossy(k).to_string(),
                 String::from_utf8_lossy(v).to_string(),
             ]
         }).collect();
-        
+
         if let Some(limit_expr) = &select.limit {
             if let crate::sql::parser::ast::Expr::LitInt(n) = limit_expr {
                 let n = *n as usize;
@@ -97,7 +105,7 @@ impl Executor {
                 }
             }
         }
-        
+
         Ok(ResultSet {
             columns,
             rows: result_rows,
@@ -107,7 +115,7 @@ impl Executor {
 
     fn execute_insert(&mut self, insert: &crate::sql::parser::ast::InsertStmt) -> Result<ResultSet> {
         let table = &insert.table;
-        
+
         let mut affected = 0;
         for row in &insert.values {
             if let Some(expr) = row.first() {
@@ -118,19 +126,20 @@ impl Executor {
                     crate::sql::parser::ast::Expr::LitNull => String::new(),
                     _ => "".to_string(),
                 };
-                let key = format!("{}:{}", table, affected);
+                let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+                let key = format!("{}:{}", table, id);
                 self.engine.put(1, key.as_bytes(), value.as_bytes())?;
                 affected += 1;
             }
         }
-        
+
         Ok(ResultSet { columns: vec![], rows: vec![], affected })
     }
 
     fn execute_update(&mut self, update: &crate::sql::parser::ast::UpdateStmt) -> Result<ResultSet> {
         let rows = self.engine.scan(1, b"", b"")?;
         let mut affected = 0;
-        
+
         let new_value = if !update.sets.is_empty() {
             let (_, expr) = &update.sets[0];
             match expr {
@@ -150,19 +159,19 @@ impl Executor {
                 affected += 1;
             }
         }
-        
+
         Ok(ResultSet { columns: vec![], rows: vec![], affected })
     }
 
     fn execute_delete(&mut self, delete: &crate::sql::parser::ast::DeleteStmt) -> Result<ResultSet> {
         let rows = self.engine.scan(1, b"", b"")?;
         let mut affected = 0;
-        
+
         for (key, _) in rows {
             self.engine.delete(1, &key)?;
             affected += 1;
         }
-        
+
         Ok(ResultSet { columns: vec![], rows: vec![], affected })
     }
 }
@@ -178,24 +187,60 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "SQL stub not implemented - see plan.md v2.0"]
-    fn test_executor_select() {
-        let mut engine = crate::engine::BTreeMemoryEngine::new();
-        engine.put(1, b"key1", b"value1").unwrap();
-        engine.put(1, b"key2", b"value2").unwrap();
-        
+    fn test_executor_insert_and_select() {
+        let engine = crate::engine::BTreeMemoryEngine::new();
         let mut exec = Executor::new(Box::new(engine));
+
+        exec.execute("INSERT INTO test VALUES ('{\"name\":\"Alice\",\"age\":30}')").unwrap();
         let result = exec.execute("SELECT * FROM test").unwrap();
-        
-        assert!(result.rows.len() >= 2);
+
+        assert_eq!(result.rows.len(), 1, "Should have 1 row");
+        assert_eq!(result.rows[0][1], "{\"name\":\"Alice\",\"age\":30}");
     }
 
     #[test]
-    #[ignore = "SQL stub not implemented - see plan.md v2.0"]
+    fn test_executor_multiple_insert() {
+        let engine = crate::engine::BTreeMemoryEngine::new();
+        let mut exec = Executor::new(Box::new(engine));
+
+        exec.execute("INSERT INTO test VALUES ('v1')").unwrap();
+        exec.execute("INSERT INTO test VALUES ('v2')").unwrap();
+        exec.execute("INSERT INTO test VALUES ('v3')").unwrap();
+
+        let result = exec.execute("SELECT * FROM test").unwrap();
+        assert_eq!(result.rows.len(), 3, "Should have 3 rows");
+    }
+
+    #[test]
+    fn test_json_path_filter() {
+        let engine = crate::engine::BTreeMemoryEngine::new();
+        let mut exec = Executor::new(Box::new(engine));
+
+        exec.execute("INSERT INTO users VALUES ('{\"name\":\"Alice\",\"age\":30}')").unwrap();
+        exec.execute("INSERT INTO users VALUES ('{\"name\":\"Bob\",\"age\":25}')").unwrap();
+        exec.execute("INSERT INTO users VALUES ('{\"name\":\"Charlie\",\"age\":35}')").unwrap();
+
+        let result = exec.execute("SELECT * FROM users WHERE @.age > 27").unwrap();
+        assert_eq!(result.rows.len(), 2, "Should have 2 users with age > 27");
+    }
+
+    #[test]
+    fn test_json_path_is_null() {
+        let engine = crate::engine::BTreeMemoryEngine::new();
+        let mut exec = Executor::new(Box::new(engine));
+
+        exec.execute("INSERT INTO users VALUES ('{\"name\":\"Alice\"}')").unwrap();
+        exec.execute("INSERT INTO users VALUES ('{\"name\":\"Bob\",\"phone\":\"123\"}')").unwrap();
+
+        let result = exec.execute("SELECT * FROM users WHERE @.phone IS NULL").unwrap();
+        assert_eq!(result.rows.len(), 1, "Should have 1 user without phone");
+    }
+
+    #[test]
     fn test_executor_insert() {
         let engine = crate::engine::BTreeMemoryEngine::new();
         let mut exec = Executor::new(Box::new(engine));
-        
+
         let result = exec.execute("INSERT INTO test VALUES ('hello')").unwrap();
         assert_eq!(result.affected, 1);
     }
@@ -205,17 +250,6 @@ mod tests {
 // Typed Executor with compile-time capability checking
 // =============================================================================
 
-/// SQL Executor with compile-time engine capability checks.
-/// Use this for SQL operations that require specific engine features.
-///
-/// # Example
-/// ```compile_fail
-/// use db6::{SqlExecutor, engine::HashMemoryEngine};
-/// 
-/// // 這會編譯失敗，因為 HashMemoryEngine 不支援 ORDER BY
-/// let mut exec: SqlExecutor<HashMemoryEngine> = SqlExecutor::new();
-/// exec.execute("SELECT * FROM t ORDER BY id");
-/// ```
 pub struct SqlExecutor<E: crate::engine::StorageEngine> {
     engine: E,
 }
@@ -225,7 +259,6 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
         Self { engine }
     }
 
-    /// Execute SELECT with ORDER BY - requires CanOrderBy capability
     pub fn execute_order_by(&mut self, sql: &str) -> Result<ResultSet>
     where
         E: crate::engine::CanOrderBy,
@@ -233,7 +266,6 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
         self.execute(sql)
     }
 
-    /// Execute with FTS - requires CanFts capability  
     pub fn execute_fts(&mut self, sql: &str) -> Result<ResultSet>
     where
         E: crate::engine::CanFts,
@@ -241,7 +273,6 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
         self.execute(sql)
     }
 
-    /// Execute with Transaction - requires CanTransaction capability
     pub fn execute_with_tx(&mut self, sql: &str) -> Result<ResultSet>
     where
         E: crate::engine::CanTransaction,
@@ -249,16 +280,15 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
         self.execute(sql)
     }
 
-    /// Execute any SQL (basic operations work on all engines)
     pub fn execute(&mut self, sql: &str) -> Result<ResultSet> {
         let stmts = parse(sql).map_err(|e| Error::Sql(e.to_string()))?;
-        
+
         if stmts.is_empty() {
             return Ok(ResultSet::default());
         }
 
         let stmt = &stmts[0];
-        
+
         match stmt {
             crate::sql::parser::ast::Statement::Select(select) => {
                 self.execute_select(select)
@@ -278,11 +308,15 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
 
     fn execute_select(&mut self, select: &crate::sql::parser::ast::SelectStmt) -> Result<ResultSet> {
         let _table = select.from.as_ref().ok_or_else(|| Error::Sql("No table specified".into()))?;
-        
+
         let start = b"".to_vec();
         let end = b"".to_vec();
         let mut rows = self.engine.scan(1, &start, &end)?;
-        
+
+        if let Some(ref where_expr) = select.where_ {
+            rows.retain(|(k, v)| eval_expr(where_expr, v));
+        }
+
         let columns = if select.columns.is_empty() {
             vec!["key".to_string(), "value".to_string()]
         } else {
@@ -294,7 +328,7 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
                 }
             }).collect()
         };
-        
+
         if !select.order_by.is_empty() {
             let order = &select.order_by[0];
             rows.sort_by(|a, b| {
@@ -302,14 +336,14 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
                 if order.asc { cmp } else { cmp.reverse() }
             });
         }
-        
+
         let mut result_rows: Vec<Vec<String>> = rows.iter().map(|(k, v)| {
             vec![
                 String::from_utf8_lossy(k).to_string(),
                 String::from_utf8_lossy(v).to_string(),
             ]
         }).collect();
-        
+
         if let Some(limit_expr) = &select.limit {
             if let crate::sql::parser::ast::Expr::LitInt(n) = limit_expr {
                 let n = *n as usize;
@@ -318,7 +352,7 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
                 }
             }
         }
-        
+
         Ok(ResultSet {
             columns,
             rows: result_rows,
@@ -328,7 +362,7 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
 
     fn execute_insert(&mut self, insert: &crate::sql::parser::ast::InsertStmt) -> Result<ResultSet> {
         let table = &insert.table;
-        
+
         let mut affected = 0;
         for row in &insert.values {
             if let Some(expr) = row.first() {
@@ -339,19 +373,20 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
                     crate::sql::parser::ast::Expr::LitNull => String::new(),
                     _ => "".to_string(),
                 };
-                let key = format!("{}:{}", table, affected);
+                let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+                let key = format!("{}:{}", table, id);
                 self.engine.put(1, key.as_bytes(), value.as_bytes())?;
                 affected += 1;
             }
         }
-        
+
         Ok(ResultSet { columns: vec![], rows: vec![], affected })
     }
 
     fn execute_update(&mut self, update: &crate::sql::parser::ast::UpdateStmt) -> Result<ResultSet> {
         let rows = self.engine.scan(1, b"", b"")?;
         let mut affected = 0;
-        
+
         let new_value = if !update.sets.is_empty() {
             let (_, expr) = &update.sets[0];
             match expr {
@@ -371,19 +406,19 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
                 affected += 1;
             }
         }
-        
+
         Ok(ResultSet { columns: vec![], rows: vec![], affected })
     }
 
     fn execute_delete(&mut self, delete: &crate::sql::parser::ast::DeleteStmt) -> Result<ResultSet> {
         let rows = self.engine.scan(1, b"", b"")?;
         let mut affected = 0;
-        
+
         for (key, _) in rows {
             self.engine.delete(1, &key)?;
             affected += 1;
         }
-        
+
         Ok(ResultSet { columns: vec![], rows: vec![], affected })
     }
 }

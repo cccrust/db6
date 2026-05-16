@@ -668,6 +668,21 @@ pub enum Expr {
     /// - `articles MATCH 'search term'` → Match { table: "articles", query: "search term" }
     Match { table: String, query: String },
 
+    // ── JSON Path ─────────────────────────────────────────────────────────
+
+    /// JSON Path 表達式（@.field op value）
+    ///
+    /// # 範例
+    /// - `@.age > 25` → JsonPath { path: ["age"], op: Gt, value: LitInt(25), negated: false }
+    /// - `@.name = 'Alice'` → JsonPath { path: ["name"], op: Eq, value: LitStr("Alice"), negated: false }
+    /// - `@.address.city = '台北'` → JsonPath { path: ["address", "city"], ... }
+    JsonPath {
+        path: Vec<String>,
+        op: JsonPathOpKind,
+        negated: bool,
+        value: Box<Expr>,
+    },
+
     // ── 類型轉換 ─────────────────────────────────────────────────────────
 
     /// CAST(expr AS type)
@@ -702,6 +717,20 @@ pub enum BinOp {
 pub enum UnaryOp {
     Neg,    // -
     Not,    // NOT
+}
+
+/// JSON Path 運算子種類
+#[derive(Debug, Clone, PartialEq)]
+pub enum JsonPathOpKind {
+    Eq,      // =
+    Ne,      // !=
+    Lt,      // <
+    LtEq,    // <=
+    Gt,      // >
+    GtEq,    // >=
+    Like,    // LIKE
+    In,      // IN (...)
+    IsNull,  // IS NULL
 }
 
 #[cfg(test)]

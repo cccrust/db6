@@ -60,6 +60,8 @@ pub enum Token {
 
     // ── 特殊 ────────────────────────────────────────────────────────────
     Eof,
+    /// JSON Path 前綴（@.field）
+    At,
 }
 
 // ── 關鍵字對照表 ─────────────────────────────────────────────────────────
@@ -229,6 +231,7 @@ impl Lexer {
                 '/' => { self.advance(); Ok(Token::Slash) }
                 '%' => { self.advance(); Ok(Token::Percent) }
                 '=' => { self.advance(); Ok(Token::Eq) }
+                '@' => { self.advance(); Ok(Token::At) }
                 '<' => {
                     self.advance();
                     match self.peek() {

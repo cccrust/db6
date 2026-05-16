@@ -3,6 +3,7 @@
 //! 需修改：將呼叫 pager 的部分改為呼叫 StorageEngine trait。
 
 pub mod executor;
+pub mod json_path;
 pub mod transaction;
 
 pub use executor::{Executor, ResultSet, SqlExecutor};
