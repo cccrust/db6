@@ -66,6 +66,15 @@ pub trait StorageEngine: Send + Sync {
     /// 範圍刪除
     fn range_delete(&mut self, table_id: u32, start: &[u8], end: &[u8]) -> Result<()>;
 
+    // ── FTS (Full-Text Search) ────────────────────────────────────────────
+    // FTS 需透過 FtsIndex 物件使用，請參考 examples/fts_kv_api.rs
+    // 
+    // 使用方式:
+    //   use db6::FtsIndex;
+    //   let mut fts = FtsIndex::new(engine);
+    //   fts.insert(doc_id, text)?;
+    //   let results = fts.search(query)?;
+
     // ── 持久化 ────────────────────────────────────────────────────────────
 
     /// 將記憶體資料刷到磁碟
