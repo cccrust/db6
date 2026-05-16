@@ -1,13 +1,23 @@
 //! db6 REPL - Interactive SQL command line
 
-use db6::{parse, Executor};
-use db6::engine::MemoryEngine;
+use db6::Executor;
+use db6::engine::{MemoryEngine, BTreeEngine, LsmEngine, StorageEngine};
 use std::io::{self, Write};
 
+fn create_engine(engine_type: &str) -> Option<Box<dyn StorageEngine>> {
+    match engine_type {
+        "memory" => Some(Box::new(MemoryEngine::new())),
+        "btree" => Some(Box::new(BTreeEngine::new())),
+        "lsm" => Some(Box::new(LsmEngine::new())),
+        _ => None,
+    }
+}
+
 fn main() {
-    println!("db6 v2.1.0 - Interactive SQL REPL");
+    println!("db6 v2.2.0 - Interactive SQL REPL");
     println!("Type '.quit' to exit, '.help' for commands\n");
 
+    let mut engine_type = "memory".to_string();
     let engine = MemoryEngine::new();
     let mut executor = Executor::new(Box::new(engine));
 
@@ -25,6 +35,18 @@ fn main() {
             continue;
         }
 
+        if input.starts_with(".engine ") {
+            let new_type = input.trim_start_matches(".engine ").trim();
+            if let Some(engine) = create_engine(new_type) {
+                engine_type = new_type.to_string();
+                executor = Executor::new(engine);
+                println!("Switched to {} engine", engine_type);
+            } else {
+                println!("Unknown engine: {}. Use: memory, btree, lsm", new_type);
+            }
+            continue;
+        }
+
         match input {
             ".quit" | ".exit" => break,
             ".help" => {
@@ -32,15 +54,46 @@ fn main() {
                 println!("  .quit, .exit  - Exit REPL");
                 println!("  .help         - Show this help");
                 println!("  .engine       - Show current engine");
+                println!("  .engine <type> - Switch engine (memory, btree, lsm)");
+                println!("  .read <file>  - Execute SQL from file");
                 println!("");
                 println!("SQL Examples:");
                 println!("  SELECT * FROM users");
                 println!("  INSERT INTO t VALUES (1, 'hello')");
-                println!("  CREATE TABLE users (id INTEGER, name TEXT)");
+                println!("  UPDATE t SET value = 'new'");
+                println!("  DELETE FROM t");
+                println!("  SELECT * FROM t ORDER BY key DESC LIMIT 10");
                 continue;
             }
             ".engine" => {
-                println!("Engine: Memory");
+                println!("Engine: {}", engine_type);
+                continue;
+            }
+            _ if input.starts_with(".read ") => {
+                let path = input.trim_start_matches(".read ").trim();
+                match std::fs::read_to_string(path) {
+                    Ok(sql) => {
+                        for stmt in sql.split(';') {
+                            let stmt = stmt.trim();
+                            if !stmt.is_empty() {
+                                match executor.execute(stmt) {
+                                    Ok(result) => {
+                                        if result.rows.is_empty() {
+                                            println!("OK ({} rows)", result.affected);
+                                        } else {
+                                            println!("{} rows:", result.rows.len());
+                                            for row in &result.rows {
+                                                println!("  {:?}", row);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => println!("Error: {:?}", e),
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => println!("Error reading file: {}", e),
+                }
                 continue;
             }
             _ => {}

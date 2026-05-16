@@ -82,6 +82,36 @@ impl StorageEngine for MemoryEngine {
         Ok(iter.map(|(k, v)| (k.clone(), v.clone())).collect())
     }
 
+    fn batch_put(&mut self, table_id: u32, pairs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()> {
+        let table = self.table_mut(table_id);
+        for (key, value) in pairs {
+            table.insert(key, value);
+        }
+        Ok(())
+    }
+
+    fn range_delete(&mut self, table_id: u32, start: &[u8], end: &[u8]) -> Result<()> {
+        use std::collections::Bound;
+        let table = self.table_mut(table_id);
+
+        let start_bound = if start.is_empty() {
+            Bound::Unbounded
+        } else {
+            Bound::Included(start.to_vec())
+        };
+        let end_bound = if end.is_empty() {
+            Bound::Unbounded
+        } else {
+            Bound::Excluded(end.to_vec())
+        };
+
+        let keys: Vec<Vec<u8>> = table.range((start_bound, end_bound)).map(|(k, _)| k.clone()).collect();
+        for key in keys {
+            table.remove(&key);
+        }
+        Ok(())
+    }
+
     fn flush(&mut self) -> Result<()> {
         // 純記憶體，nothing to flush
         Ok(())

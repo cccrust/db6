@@ -58,6 +58,12 @@ pub trait StorageEngine: Send + Sync {
     /// 範圍掃描 [start, end)
     fn scan(&self, table_id: u32, start: &[u8], end: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>>;
 
+    /// 批量寫入（效能優化）
+    fn batch_put(&mut self, table_id: u32, pairs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()>;
+
+    /// 範圍刪除
+    fn range_delete(&mut self, table_id: u32, start: &[u8], end: &[u8]) -> Result<()>;
+
     // ── 持久化 ────────────────────────────────────────────────────────────
 
     /// 將記憶體資料刷到磁碟

@@ -11,12 +11,10 @@
 
 pub mod engine;
 pub mod error;
-pub mod kv;
 pub mod sql;
 pub mod fts;
 
-pub use engine::{EngineStats, StorageEngine};
+pub use engine::{EngineStats, StorageEngine, KvStore};
 pub use error::{Error, Result};
 pub use fts::{FtsIndex, FtsTokenizer, CjkTokenizer, EnglishTokenizer};
-pub use kv::{KvStore, Transactional, Persistent};
 pub use sql::{parse, Executor, ResultSet};

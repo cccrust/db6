@@ -200,6 +200,59 @@ impl StorageEngine for LsmEngine {
         Ok(results)
     }
 
+    fn batch_put(&mut self, table_id: u32, pairs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()> {
+        if table_id != 1 {
+            return Err(Error::NotSupported("LSM engine only supports table_id=1".into()));
+        }
+
+        if *self.in_transaction.read().unwrap() {
+            let mut tx = self.tx_buffer.write().unwrap();
+            if tx.is_none() {
+                *tx = Some(BTreeMap::new());
+            }
+            if let Some(ref mut buffer) = *tx {
+                for (key, value) in pairs {
+                    buffer.insert(key, Some(value));
+                }
+            }
+        } else {
+            let mut mem = self.memtable.write().unwrap();
+            for (key, value) in pairs {
+                mem.put(key, value);
+            }
+        }
+        Ok(())
+    }
+
+    fn range_delete(&mut self, table_id: u32, start: &[u8], end: &[u8]) -> Result<()> {
+        if table_id != 1 {
+            return Err(Error::NotSupported("LSM engine only supports table_id=1".into()));
+        }
+
+        let keys: Vec<Vec<u8>> = self.memtable.read().unwrap().scan(start, end)
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+
+        if *self.in_transaction.read().unwrap() {
+            let mut tx = self.tx_buffer.write().unwrap();
+            if tx.is_none() {
+                *tx = Some(BTreeMap::new());
+            }
+            if let Some(ref mut buffer) = *tx {
+                for key in keys {
+                    buffer.insert(key, None);
+                }
+            }
+        } else {
+            let mut mem = self.memtable.write().unwrap();
+            for key in keys {
+                mem.delete(key);
+            }
+        }
+        Ok(())
+    }
+
     fn flush(&mut self) -> Result<()> {
         Ok(())
     }

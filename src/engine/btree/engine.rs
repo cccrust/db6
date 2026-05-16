@@ -102,6 +102,41 @@ impl StorageEngine for BTreeEngine {
         Ok(results)
     }
 
+    fn batch_put(&mut self, table_id: u32, pairs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()> {
+        if *self.in_transaction.read().unwrap() {
+            let mut tx = self.tx_buffer.write().unwrap();
+            let table = tx.entry(table_id).or_insert_with(BTreeMap::new);
+            for (key, value) in pairs {
+                table.insert(key, Some(value));
+            }
+        } else {
+            for (key, value) in pairs {
+                self.tree.write().unwrap().put(key, value);
+            }
+        }
+        Ok(())
+    }
+
+    fn range_delete(&mut self, table_id: u32, start: &[u8], end: &[u8]) -> Result<()> {
+        let keys: Vec<Vec<u8>> = self.tree.read().unwrap().scan(start, end)
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        
+        if *self.in_transaction.read().unwrap() {
+            let mut tx = self.tx_buffer.write().unwrap();
+            let table = tx.entry(table_id).or_insert_with(BTreeMap::new);
+            for key in keys {
+                table.insert(key, None);
+            }
+        } else {
+            for key in keys {
+                self.tree.write().unwrap().delete(&key);
+            }
+        }
+        Ok(())
+    }
+
     fn flush(&mut self) -> Result<()> {
         self.tree.write().unwrap().flush()
     }
