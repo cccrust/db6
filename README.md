@@ -1,6 +1,6 @@
 # db6
 
-Unified database with pluggable storage engines (Memory/BTree/LSM) + KV + FTS5
+Unified database with pluggable storage engines (Memory/BTree/LSM) (KV + FTS + SQL)
 
 ## 快速開始
 
@@ -12,7 +12,8 @@ cargo test     # 測試
 ## 版本策略
 
 - **v0.x**: 專注 KV 層（StorageEngine trait + 三種引擎）
-- **v1.0+**: 加入 SQL 層
+- **v1.0+**: 加入 FTS 層
+- **v2.0+**: 加入 SQL 層
 
 ## 儲存引擎
 
@@ -45,9 +46,9 @@ src/
 
 ## 相關專案
 
-- [sql6](https://github.com/ccc/sp6) — SQL 實作來源
-- [lsm5](https://github.com/ccc/lsm5) — LSM 實作來源
-- [btree6](https://github.com/ccc/btree6) — BTree 實作來源
+- [sql6](https://github.com/cccrust/sp6) — SQL 實作來源
+- [lsm5](https://github.com/cccrust/lsm5) — LSM 實作來源
+- [btree6](https://github.com/cccrust/btree6) — BTree 實作來源
 
 ## 開發計畫
 

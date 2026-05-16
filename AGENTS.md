@@ -20,7 +20,7 @@ cargo test     # Run tests
 - `src/sql/` — SQL stub (ignored until v1.0)
 - `src/fts/` — FTS stub (ignored until v1.0)
 
-## Status (v0.3)
+## Status (v1.0)
 
 | Component | Status |
 |-----------|--------|
@@ -29,6 +29,9 @@ cargo test     # Run tests
 | BTreeEngine | ✅ Done |
 | LsmEngine | ✅ Done |
 | KvStore trait | ✅ Done |
+| FtsIndex (KV-based) | ✅ Done |
+| CjkTokenizer | ✅ Done |
+| EnglishTokenizer | ✅ Done |
 
 ## Entry Point
 
