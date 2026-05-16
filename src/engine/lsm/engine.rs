@@ -1,85 +1,23 @@
-//! LSM engine — Simplified implementation based on lsm5
+//! LsmEngine implementation
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::RwLock;
 
 use crate::engine::{EngineStats, StorageEngine};
 use crate::error::{Error, Result};
 
-/// Value type in LSM - supports tombstones for deletions
-#[derive(Clone, Debug)]
-enum Value {
-    Data(Vec<u8>),
-    Tombstone,
-}
+use super::memtable::MemTable;
+use super::sstable::SSTable;
+use super::wal::Wal;
+use super::bloom::BloomFilter;
 
-/// MemTable - in-memory write buffer
-struct MemTable {
-    map: BTreeMap<Vec<u8>, Value>,
-}
-
-impl MemTable {
-    fn new() -> Self {
-        Self { map: BTreeMap::new() }
-    }
-
-    fn put(&mut self, key: Vec<u8>, value: Vec<u8>) {
-        self.map.insert(key, Value::Data(value));
-    }
-
-    fn delete(&mut self, key: Vec<u8>) {
-        self.map.insert(key, Value::Tombstone);
-    }
-
-    fn get(&self, key: &[u8]) -> Option<&Value> {
-        self.map.get(key)
-    }
-
-    fn scan(&self, start: &[u8], end: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
-        let start = if start.is_empty() { None } else { Some(start.to_vec()) };
-        let end = if end.is_empty() { None } else { Some(end.to_vec()) };
-
-        match (start, end) {
-            (None, None) => self.map.iter()
-                .filter(|(_, v)| !matches!(v, Value::Tombstone))
-                .map(|(k, v)| match v {
-                    Value::Data(d) => (k.clone(), d.clone()),
-                    Value::Tombstone => (k.clone(), vec![]),
-                })
-                .collect(),
-            (Some(s), None) => self.map.range(s..)
-                .filter(|(_, v)| !matches!(v, Value::Tombstone))
-                .map(|(k, v)| match v {
-                    Value::Data(d) => (k.clone(), d.clone()),
-                    Value::Tombstone => (k.clone(), vec![]),
-                })
-                .collect(),
-            (None, Some(e)) => self.map.range(..e)
-                .filter(|(_, v)| !matches!(v, Value::Tombstone))
-                .map(|(k, v)| match v {
-                    Value::Data(d) => (k.clone(), d.clone()),
-                    Value::Tombstone => (k.clone(), vec![]),
-                })
-                .collect(),
-            (Some(s), Some(e)) => self.map.range(s..e)
-                .filter(|(_, v)| !matches!(v, Value::Tombstone))
-                .map(|(k, v)| match v {
-                    Value::Data(d) => (k.clone(), d.clone()),
-                    Value::Tombstone => (k.clone(), vec![]),
-                })
-                .collect(),
-        }
-    }
-}
-
-/// LSM Engine - Simplified version
-/// 
-/// Architecture:
-/// - MemTable: in-memory write buffer
-/// - Data stored in memory (no disk persistence for v0.3)
-/// - Limited transaction support (single table only)
 pub struct LsmEngine {
+    path: Option<std::path::PathBuf>,
     memtable: RwLock<MemTable>,
+    sstables: RwLock<Vec<SSTable>>,
+    bloom: RwLock<BloomFilter>,
+    wal: RwLock<Option<Wal>>,
     in_transaction: RwLock<bool>,
     tx_buffer: RwLock<Option<BTreeMap<Vec<u8>, Option<Vec<u8>>>>>,
 }
@@ -87,14 +25,62 @@ pub struct LsmEngine {
 impl LsmEngine {
     pub fn new() -> Self {
         LsmEngine {
+            path: None,
             memtable: RwLock::new(MemTable::new()),
+            sstables: RwLock::new(Vec::new()),
+            bloom: RwLock::new(BloomFilter::new(1024)),
+            wal: RwLock::new(None),
             in_transaction: RwLock::new(false),
             tx_buffer: RwLock::new(None),
         }
     }
 
-    pub fn open(_path: &std::path::Path) -> Result<Self> {
-        Ok(Self::new())
+    pub fn open(path: &Path) -> Result<Self> {
+        let mut engine = Self::new();
+        engine.path = Some(path.to_path_buf());
+        
+        // Try to load existing SSTables
+        if path.exists() {
+            if let Ok(entries) = std::fs::read_dir(path) {
+                let mut sstables = engine.sstables.write().unwrap();
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().map_or(false, |ext| ext == "sst") {
+                        if let Ok(ss) = SSTable::open(&path) {
+                            sstables.push(ss);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Try to open WAL
+        let wal_path = path.join("wal.log");
+        if wal_path.exists() {
+            engine.wal = RwLock::new(Some(Wal::open(&wal_path)?));
+        }
+        
+        Ok(engine)
+    }
+
+    fn flush_memtable(&self) -> Result<()> {
+        let mem = self.memtable.read().unwrap();
+        
+        // Update bloom filter with all keys
+        for (k, _) in mem.all_data() {
+            self.bloom.write().unwrap().insert(&k);
+        }
+        
+        // Write to WAL
+        if let Ok(wal) = self.wal.read() {
+            if let Some(w) = wal.as_ref() {
+                for (k, v) in mem.all_data() {
+                    w.write(&k, &v)?;
+                }
+            }
+        }
+        
+        Ok(())
     }
 }
 
@@ -105,7 +91,7 @@ impl Default for LsmEngine {
 }
 
 impl StorageEngine for LsmEngine {
-    fn open(path: &std::path::Path) -> Result<Box<dyn StorageEngine>> {
+    fn open(path: &Path) -> Result<Box<dyn StorageEngine>> {
         Ok(Box::new(Self::open(path)?))
     }
 
@@ -117,14 +103,14 @@ impl StorageEngine for LsmEngine {
         "lsm"
     }
 
-    fn get(&self, _table_id: u32, key: &[u8]) -> Result<Option<Vec<u8>>> {
+    fn get(&self, table_id: u32, key: &[u8]) -> Result<Option<Vec<u8>>> {
         // Check transaction buffer first
         if let Ok(tx) = self.tx_buffer.read() {
             if let Some(buffer) = tx.as_ref() {
                 if let Some(value) = buffer.get(key) {
                     return match value {
                         Some(v) => Ok(Some(v.clone())),
-                        None => Ok(None), // Deleted in transaction
+                        None => Ok(None),
                     };
                 }
             }
@@ -132,19 +118,35 @@ impl StorageEngine for LsmEngine {
 
         // Check memtable
         let mem = self.memtable.read().unwrap();
-        match mem.get(key) {
-            Some(Value::Data(v)) => Ok(Some(v.clone())),
-            Some(Value::Tombstone) => Ok(None),
-            None => Ok(None),
+        if let Some(v) = mem.get(key) {
+            if v.is_data() {
+                return Ok(Some(v.get_data().unwrap().clone()));
+            } else {
+                return Ok(None);
+            }
         }
+        drop(mem);
+
+        // Check bloom filter first
+        if !self.bloom.read().unwrap().might_contain(key) {
+            return Ok(None);
+        }
+
+        // Check SSTables
+        let sstables = self.sstables.read().unwrap();
+        for ss in sstables.iter().rev() {
+            if let Some(v) = ss.get(key) {
+                return Ok(Some(v));
+            }
+        }
+
+        Ok(None)
     }
 
     fn put(&mut self, table_id: u32, key: &[u8], value: &[u8]) -> Result<()> {
-        // LSM only supports single-table operations
         if table_id != 1 {
             return Err(Error::NotSupported("LSM engine only supports table_id=1".into()));
         }
-
         if *self.in_transaction.read().unwrap() {
             let mut tx = self.tx_buffer.write().unwrap();
             if tx.is_none() {
@@ -163,14 +165,13 @@ impl StorageEngine for LsmEngine {
         if table_id != 1 {
             return Err(Error::NotSupported("LSM engine only supports table_id=1".into()));
         }
-
         if *self.in_transaction.read().unwrap() {
             let mut tx = self.tx_buffer.write().unwrap();
             if tx.is_none() {
                 *tx = Some(BTreeMap::new());
             }
             if let Some(ref mut buffer) = *tx {
-                buffer.insert(key.to_vec(), None); // Tombstone
+                buffer.insert(key.to_vec(), None);
             }
         } else {
             self.memtable.write().unwrap().delete(key.to_vec());
@@ -204,7 +205,6 @@ impl StorageEngine for LsmEngine {
         if table_id != 1 {
             return Err(Error::NotSupported("LSM engine only supports table_id=1".into()));
         }
-
         if *self.in_transaction.read().unwrap() {
             let mut tx = self.tx_buffer.write().unwrap();
             if tx.is_none() {
@@ -228,7 +228,6 @@ impl StorageEngine for LsmEngine {
         if table_id != 1 {
             return Err(Error::NotSupported("LSM engine only supports table_id=1".into()));
         }
-
         let keys: Vec<Vec<u8>> = self.memtable.read().unwrap().scan(start, end)
             .into_iter()
             .map(|(k, _)| k)
@@ -254,11 +253,11 @@ impl StorageEngine for LsmEngine {
     }
 
     fn flush(&mut self) -> Result<()> {
-        Ok(())
+        self.flush_memtable()
     }
 
     fn sync(&mut self) -> Result<()> {
-        Ok(())
+        self.flush_memtable()
     }
 
     fn begin_transaction(&mut self) -> Result<()> {
@@ -275,16 +274,17 @@ impl StorageEngine for LsmEngine {
         }
 
         if let Some(buffer) = self.tx_buffer.write().unwrap().take() {
+            let mut mem = self.memtable.write().unwrap();
             for (key, value) in buffer.into_iter() {
                 match value {
-                    Some(v) => self.memtable.write().unwrap().put(key, v),
-                    None => self.memtable.write().unwrap().delete(key.clone()),
+                    Some(v) => mem.put(key, v),
+                    None => mem.delete(key),
                 }
             }
         }
 
         *self.in_transaction.write().unwrap() = false;
-        Ok(())
+        self.flush_memtable()
     }
 
     fn rollback_transaction(&mut self) -> Result<()> {
@@ -301,8 +301,10 @@ impl StorageEngine for LsmEngine {
     }
 
     fn stats(&self) -> EngineStats {
+        let mem_keys = self.memtable.read().unwrap().len() as u64;
+        let sstable_keys: u64 = self.sstables.read().unwrap().iter().map(|s| s.len()).sum();
         EngineStats {
-            key_count: self.memtable.read().unwrap().map.len() as u64,
+            key_count: mem_keys + sstable_keys,
             size_bytes: 0,
             cache_hit_rate: None,
             in_transaction: *self.in_transaction.read().unwrap(),

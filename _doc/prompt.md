@@ -19,6 +19,11 @@
     * 強化 memory 模組（API 完整度，效能，穩定度)
     * 強化後的 lsm , btree, memory, kv, fts, sql 等模組，必須要能被外部引用並呼叫之
     * 請在 examples/ 下寫出直接使用的範例，並寫出 test_examples.sh 測試結果的正確性
+* 目前 memory.rs 使用 btree 方式，效能會比較差嗎？如果改成類似 redis 會更快嗎？
+    * 是否需要將 memory 分成兩版，一版像是 sqlite memory 支援 sql，另一版像是 redis 支援 kv
+* 目前 fts (fulltext) 還有什麼沒做的呢？
+
+    
 
 ## 工具呼叫穩定性協議（防止生成中斷）
 - 當你透過類似 `<invoke name="edit">` 的方法進行大規模的程式碼修改時，如果預估程式碼內容可能會接近你的單次最大輸出 Token 限制（max output token limit），**請絕對不要嘗試一次發送整塊龐大的程式碼**。
