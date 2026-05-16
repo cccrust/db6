@@ -48,18 +48,24 @@ impl BTreeMemoryEngine {
 
     fn save(&self) -> Result<()> {
         if let Some(ref path) = self.path {
+            let temp_path = path.join("btree.tmp");
             let data_path = path.join("btree.dat");
             
+            // Write to temp file
             let mut file = OpenOptions::new()
                 .create(true)
                 .write(true)
                 .truncate(true)
-                .open(&data_path)?;
+                .open(&temp_path)?;
             
             let data = bincode::serialize(&self.tables)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("bincode: {:?}", e)))?;
             
             file.write_all(&data)?;
+            drop(file);
+            
+            // Atomic rename
+            std::fs::rename(&temp_path, &data_path)?;
         }
         Ok(())
     }
