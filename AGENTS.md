@@ -20,14 +20,14 @@ cargo test     # Run tests
 - `src/sql/` — SQL stub (ignored until v1.0)
 - `src/fts/` — FTS stub (ignored until v1.0)
 
-## Status (v0.2)
+## Status (v0.3)
 
 | Component | Status |
 |-----------|--------|
 | StorageEngine trait | ✅ Done |
 | MemoryEngine | ✅ Done |
 | BTreeEngine | ✅ Done |
-| LsmEngine | TODO |
+| LsmEngine | ✅ Done |
 | KvStore trait | ✅ Done |
 
 ## Entry Point

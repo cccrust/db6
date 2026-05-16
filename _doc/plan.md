@@ -14,14 +14,22 @@ db6 是一個統一的資料庫框架，同時支援三種儲存引擎：
 
 ## 2. 版本策略
 
-**v0.x 系列：專注於 KV 層**
-- 只實作 KV API（get/put/delete/scan）
-- 不加入 SQL 語法
+**v0.xx 系列：專注於 KV 層**
+- 只實作 KV API（get/put/delete/scan + transactions）
 - 先建立穩定的儲存引擎核心
+- v0.1: Memory engine
+- v0.2: BTree engine
+- v0.3: LSM engine
 
-**v1.0+：加入 SQL 層**
+**v1.xx 系列：加入 FTS 全文檢索**
+- 基於 KV 介面實作 FTS
+- 三個引擎都能支援 FTS
+- CJK 分詞器（雙元分詞）
+
+**v2.xx 系列：加入 SQL 層**
 - 移植 sql6 的 parser/planner/executor
 - SQL 建構在 KV 之上
+- SELECT / INSERT / UPDATE / DELETE
 
 ---
 
@@ -34,15 +42,15 @@ db6/
 │   ├── engine/
 │   │   ├── mod.rs                  # StorageEngine trait（核心抽象）
 │   │   ├── memory.rs               # Memory engine (BTreeMap)
-│   │   ├── btree.rs                # BTree engine
+│   │   ├── btree/                   # BTree engine
 │   │   └── lsm.rs                  # LSM engine
 │   ├── kv/
-│   │   └── mod.rs                  # KvStore trait impl for all engines
-│   ├── sql/                        # SQL 層 (v1.0 才加入)
+│   │   └── mod.rs                  # KvStore trait
+│   ├── sql/                        # SQL 層 (v2.x 才加入)
 │   │   ├── parser/
 │   │   ├── planner/
 │   │   └── executor/
-│   └── fts/                        # FTS5 (基於 KV 介面，v1.0 才加入)
+│   └── fts/                        # FTS5 (基於 KV 介面，v1.x 才加入)
 ```
 
 ---
@@ -120,41 +128,57 @@ pub trait StorageEngine: Send + Sync {
 
 ```
 ✅ BTree engine 實作
-✅ 磁碟持久化
 ✅ 完整交易支援
 ```
 
 ### v0.3 — LSM Engine
 
 ```
-✅ LSM engine 實作
-✅ WAL + Compaction
-✅ 有限交易支援
+LSM engine 實作（移植自 lsm5）
+WAL + Compaction
+有限交易支援
 ```
 
 ### v0.4 — KV 整合測試
 
 ```
-✅ 三個引擎統一測試
-✅ 跨引擎 benchmark
+三個引擎統一測試
+跨引擎 benchmark
 ```
 
-### v1.0 — SQL 層
+### v1.0 — FTS 全文檢索
 
 ```
-✅ SQL parser 移植
-✅ SQL planner 移植  
-✅ SQL executor 移植
-✅ SELECT / INSERT / UPDATE / DELETE
-✅ 同一份 SQL 在三個引擎都能跑
+FTS5 全文檢索（基於 KV 介面）
+CJK 分詞（雙元分詞）
+倒排索引
+MATCH 查詢
 ```
 
-### v1.1 — FTS + 完整功能
+### v1.1 — FTS 進階
 
 ```
-✅ FTS5 全文檢索（基於 KV 介面）
-✅ CJK 分詞
-✅ CLI / REPL
+布林查詢（AND/OR/NOT）
+前綴匹配
+BM25 排序
+```
+
+### v2.0 — SQL 層
+
+```
+SQL parser 移植
+SQL planner 移植
+SQL executor 移植
+SELECT / INSERT / UPDATE / DELETE
+同一份 SQL 在三個引擎都能跑
+```
+
+### v2.1 — SQL 完整功能
+
+```
+JOIN 支援
+複雜 ORDER BY
+CLI / REPL
 ```
 
 ---
