@@ -847,14 +847,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Known issue: multiple queries on same Db causes borrow conflict"]
     fn test_limit_offset_pagination() {
-        let mut db = Db::new("btree").unwrap();
+        let mut db = Db::new("btree-mem").unwrap();
         for i in 1..=10 {
-            db.table("users").put(format!("{}", i).as_bytes(), format!("User{}", i).as_bytes()).unwrap();
+            db.table("users").put(format!("{:03}", i).as_bytes(), format!("User{}", i).as_bytes()).unwrap();
         }
-
-        // Page 1: limit 3, offset 0
         let page1 = db.select("key, value")
             .from("users")
             .order_by("key")
@@ -863,11 +860,10 @@ mod tests {
             .execute()
             .unwrap();
         assert_eq!(page1.rows.len(), 3);
-        assert_eq!(page1.rows[0][0], "1");
-        assert_eq!(page1.rows[1][0], "2");
-        assert_eq!(page1.rows[2][0], "3");
+        assert_eq!(page1.rows[0][0], "001");
+        assert_eq!(page1.rows[1][0], "002");
+        assert_eq!(page1.rows[2][0], "003");
 
-        // Page 2: limit 3, offset 3
         let page2 = db.select("key, value")
             .from("users")
             .order_by("key")
@@ -876,11 +872,10 @@ mod tests {
             .execute()
             .unwrap();
         assert_eq!(page2.rows.len(), 3);
-        assert_eq!(page2.rows[0][0], "4");
-        assert_eq!(page2.rows[1][0], "5");
-        assert_eq!(page2.rows[2][0], "6");
+        assert_eq!(page2.rows[0][0], "004");
+        assert_eq!(page2.rows[1][0], "005");
+        assert_eq!(page2.rows[2][0], "006");
 
-        // Page 3: limit 3, offset 6
         let page3 = db.select("key, value")
             .from("users")
             .order_by("key")
@@ -889,8 +884,8 @@ mod tests {
             .execute()
             .unwrap();
         assert_eq!(page3.rows.len(), 3);
-        assert_eq!(page3.rows[0][0], "7");
-        assert_eq!(page3.rows[1][0], "8");
-        assert_eq!(page3.rows[2][0], "9");
+        assert_eq!(page3.rows[0][0], "007");
+        assert_eq!(page3.rows[1][0], "008");
+        assert_eq!(page3.rows[2][0], "009");
     }
 }
