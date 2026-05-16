@@ -3,18 +3,65 @@
 //! Uses HashMap for O(1) operations, does NOT support ORDER BY or range scans.
 
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::Path;
 use crate::engine::{EngineStats, StorageEngine};
 use crate::error::Result;
 
 pub struct HashMemoryEngine {
     tables: HashMap<u32, HashMap<Vec<u8>, Vec<u8>>>,
+    path: Option<std::path::PathBuf>,
 }
 
 impl HashMemoryEngine {
     pub fn new() -> Self {
         HashMemoryEngine {
             tables: HashMap::new(),
+            path: None,
         }
+    }
+
+    pub fn open(path: &Path) -> Result<Self> {
+        std::fs::create_dir_all(path)?;
+        
+        let data_path = path.join("hashtable.dat");
+        
+        let tables = if data_path.exists() {
+            let mut file = File::open(&data_path)?;
+            let mut contents = Vec::new();
+            file.read_to_end(&mut contents)?;
+            
+            match bincode::deserialize(&contents) {
+                Ok(t) => t,
+                Err(_) => HashMap::new(),
+            }
+        } else {
+            HashMap::new()
+        };
+        
+        Ok(HashMemoryEngine {
+            tables,
+            path: Some(path.to_path_buf()),
+        })
+    }
+
+    fn save(&self) -> Result<()> {
+        if let Some(ref path) = self.path {
+            let data_path = path.join("hashtable.dat");
+            
+            let mut file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&data_path)?;
+            
+            let data = bincode::serialize(&self.tables)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("bincode: {:?}", e)))?;
+            
+            file.write_all(&data)?;
+        }
+        Ok(())
     }
 
     fn table_mut(&mut self, table_id: u32) -> &mut HashMap<Vec<u8>, Vec<u8>> {
@@ -29,8 +76,8 @@ impl Default for HashMemoryEngine {
 }
 
 impl StorageEngine for HashMemoryEngine {
-    fn open(_path: &std::path::Path) -> Result<Box<dyn StorageEngine>> {
-        Ok(Box::new(Self::new()))
+    fn open(path: &std::path::Path) -> Result<Box<dyn StorageEngine>> {
+        Ok(Box::new(Self::open(path)?))
     }
 
     fn open_memory() -> Box<dyn StorageEngine> {
@@ -77,11 +124,11 @@ impl StorageEngine for HashMemoryEngine {
     }
 
     fn flush(&mut self) -> Result<()> {
-        Ok(())
+        self.save()
     }
 
     fn sync(&mut self) -> Result<()> {
-        Ok(())
+        self.save()
     }
 
     fn begin_transaction(&mut self) -> Result<()> {
@@ -161,6 +208,29 @@ mod tests {
         engine.batch_put(1, pairs).unwrap();
         assert_eq!(engine.get(1, b"k1").unwrap(), Some(b"v1".to_vec()));
         assert_eq!(engine.get(1, b"k2").unwrap(), Some(b"v2".to_vec()));
+    }
+
+    #[test]
+    fn test_hash_persistence() {
+        let temp_dir = std::env::temp_dir().join("db6_hash_persist_test");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        
+        // Write data
+        {
+            let mut engine = HashMemoryEngine::open(Path::new(&temp_dir)).unwrap();
+            engine.put(1, b"key1", b"value1").unwrap();
+            engine.put(1, b"key2", b"value2").unwrap();
+            engine.flush().unwrap();
+        }
+        
+        // Reopen and verify
+        {
+            let engine = HashMemoryEngine::open(Path::new(&temp_dir)).unwrap();
+            assert_eq!(engine.get(1, b"key1").unwrap(), Some(b"value1".to_vec()));
+            assert_eq!(engine.get(1, b"key2").unwrap(), Some(b"value2".to_vec()));
+        }
+        
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
 

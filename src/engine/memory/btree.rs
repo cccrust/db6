@@ -3,18 +3,65 @@
 //! Uses BTreeMap for ordered data, supports ORDER BY and range scans.
 
 use std::collections::BTreeMap;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::Path;
 use crate::engine::{EngineStats, StorageEngine};
 use crate::error::Result;
 
 pub struct BTreeMemoryEngine {
     tables: std::collections::HashMap<u32, BTreeMap<Vec<u8>, Vec<u8>>>,
+    path: Option<std::path::PathBuf>,
 }
 
 impl BTreeMemoryEngine {
     pub fn new() -> Self {
         BTreeMemoryEngine {
             tables: std::collections::HashMap::new(),
+            path: None,
         }
+    }
+
+    pub fn open(path: &Path) -> Result<Self> {
+        std::fs::create_dir_all(path)?;
+        
+        let data_path = path.join("btree.dat");
+        
+        let tables = if data_path.exists() {
+            let mut file = File::open(&data_path)?;
+            let mut contents = Vec::new();
+            file.read_to_end(&mut contents)?;
+            
+            match bincode::deserialize(&contents) {
+                Ok(t) => t,
+                Err(_) => std::collections::HashMap::new(),
+            }
+        } else {
+            std::collections::HashMap::new()
+        };
+        
+        Ok(BTreeMemoryEngine {
+            tables,
+            path: Some(path.to_path_buf()),
+        })
+    }
+
+    fn save(&self) -> Result<()> {
+        if let Some(ref path) = self.path {
+            let data_path = path.join("btree.dat");
+            
+            let mut file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&data_path)?;
+            
+            let data = bincode::serialize(&self.tables)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("bincode: {:?}", e)))?;
+            
+            file.write_all(&data)?;
+        }
+        Ok(())
     }
 
     fn table(&self, table_id: u32) -> Option<&BTreeMap<Vec<u8>, Vec<u8>>> {
@@ -36,8 +83,8 @@ impl Default for BTreeMemoryEngine {
 }
 
 impl StorageEngine for BTreeMemoryEngine {
-    fn open(_path: &std::path::Path) -> Result<Box<dyn StorageEngine>> {
-        Ok(Box::new(Self::new()))
+    fn open(path: &std::path::Path) -> Result<Box<dyn StorageEngine>> {
+        Ok(Box::new(Self::open(path)?))
     }
 
     fn open_memory() -> Box<dyn StorageEngine> {
@@ -115,11 +162,11 @@ impl StorageEngine for BTreeMemoryEngine {
     }
 
     fn flush(&mut self) -> Result<()> {
-        Ok(())
+        self.save()
     }
 
     fn sync(&mut self) -> Result<()> {
-        Ok(())
+        self.save()
     }
 
     fn begin_transaction(&mut self) -> Result<()> {
@@ -200,6 +247,29 @@ mod tests {
         let results = engine.scan(1, b"", b"").unwrap();
         let keys: Vec<_> = results.iter().map(|(k, _)| k.clone()).collect();
         assert_eq!(keys, vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]);
+    }
+
+    #[test]
+    fn test_btree_persistence() {
+        let temp_dir = std::env::temp_dir().join("db6_btree_mem_persist_test");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        
+        // Write data
+        {
+            let mut engine = BTreeMemoryEngine::open(Path::new(&temp_dir)).unwrap();
+            engine.put(1, b"key1", b"value1").unwrap();
+            engine.put(1, b"key2", b"value2").unwrap();
+            engine.flush().unwrap();
+        }
+        
+        // Reopen and verify
+        {
+            let engine = BTreeMemoryEngine::open(Path::new(&temp_dir)).unwrap();
+            assert_eq!(engine.get(1, b"key1").unwrap(), Some(b"value1".to_vec()));
+            assert_eq!(engine.get(1, b"key2").unwrap(), Some(b"value2".to_vec()));
+        }
+        
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
 
