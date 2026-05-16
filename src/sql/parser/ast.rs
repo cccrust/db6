@@ -88,6 +88,8 @@ pub enum Statement {
     Commit,
     /// ROLLBACK 回滾交易
     Rollback,
+    /// CREATE VIRTUAL TABLE 建立 FTS 虛擬表
+    CreateVirtualTable(CreateVirtualTableStmt),
 }
 
 // ── SELECT ────────────────────────────────────────────────────────────────
@@ -335,6 +337,21 @@ pub struct CreateTableStmt {
     pub columns:       Vec<ColumnDef>,
     /// 表格層級約束
     pub constraints:   Vec<TableConstraint>,
+}
+
+/// CREATE VIRTUAL TABLE 建立 FTS 虛擬表
+///
+/// ```sql
+/// CREATE VIRTUAL TABLE articles USING fts(title, content);
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateVirtualTableStmt {
+    /// IF NOT EXISTS
+    pub if_not_exists: bool,
+    /// 表格名稱
+    pub name:          String,
+    /// FTS 欄位列表
+    pub columns:       Vec<String>,
 }
 
 /// 欄位定義
@@ -644,6 +661,12 @@ pub enum Expr {
 
     /// GLOB 模糊匹配（區分大小寫，使用 * 和 ?）
     Glob    { expr: Box<Expr>, pattern: Box<Expr>, negated: bool },
+
+    /// FTS MATCH 全文搜索
+    ///
+    /// # 範例
+    /// - `articles MATCH 'search term'` → Match { table: "articles", query: "search term" }
+    Match { table: String, query: String },
 
     // ── 類型轉換 ─────────────────────────────────────────────────────────
 

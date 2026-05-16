@@ -48,6 +48,9 @@ impl Executor {
             crate::sql::parser::ast::Statement::DropTable(_) => {
                 Ok(ResultSet { columns: vec![], rows: vec![], affected: 0 })
             }
+            crate::sql::parser::ast::Statement::CreateVirtualTable(_) => {
+                Ok(ResultSet { columns: vec![], rows: vec![], affected: 0 })
+            }
             _ => Err(Error::Sql("Unsupported statement".into())),
         }
     }

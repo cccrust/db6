@@ -23,20 +23,26 @@
     * 是否需要將 memory 分成兩版，一版像是 sqlite memory 支援 sql，另一版像是 redis 支援 kv
 * [x] 要讓 kv, sql 前端都可以任意挑選後端 (btree/lsm/memory btree / memory hash) 
     * 但是有些功能 sql 不支援，使用時會提出錯誤（最好在編譯時期就能提出錯誤）
-* fts (fulltext) 功能改進
+* [x] fts (fulltext) 功能改進
     * fts 應該有一組 API 應該和使用什麼儲存體無關
     * fts 應該能任意搭配 (btree/lsm/memory btree / memory hash)
     * kv api 應該有支援固定的 fts 檢索語法
     * sql api 應該有支援固定的 fts 檢索語法
     * 加入這些功能的 cargo test
     * 寫出 examples/ 中的上述範例。
-* 永久儲存於磁碟
+* [x] 永久儲存於磁碟
     * LSM 現在具備永久儲存於磁碟的功能了嗎？
     * BTree 現在具備永久儲存於磁碟的功能了嗎？
     * BTree + LSM 的這些永久儲存功能，是否是立即性的（而非最後一次性的儲存呢）？
-* memory/ 功能，要能使用 mmap 映射到硬碟檔案儲存之。
+* [x] memory/ 功能，要能使用 mmap 映射到硬碟檔案儲存之。
     * 要測試儲存後，未來重新讀回（mmap 位址更換了），是否還能正常運作
     * 如果不能正常運作，要修正，讓他能正常運作。
+* [x] sql 的 fulltext 語法 現在支援了嗎？
+    * 讓 SQL 支援 FTS (Full-Text Search) 語法，像 SQLite 一樣。
+* redis 的功能，目前有哪些重要卻沒有放入本系統 kv 中的？
+* sqlite 的功能，目前有哪些重要卻沒有放入本系統 sql 中的？
+* 仿照 redis 加入 message queue 的功能
+
 
 ## 工具呼叫穩定性協議（防止生成中斷）
 - 當你透過類似 `<invoke name="edit">` 的方法進行大規模的程式碼修改時，如果預估程式碼內容可能會接近你的單次最大輸出 Token 限制（max output token limit），**請絕對不要嘗試一次發送整塊龐大的程式碼**。

@@ -218,8 +218,23 @@ impl Parser {
                         items.push(SelectItem::TableStar(t));
                         if !self.maybe(&Token::Comma) { break; }
                         continue;
-                    }
-                }
+}
+
+    #[test]
+    fn create_virtual_table() {
+        let sql = "CREATE VIRTUAL TABLE articles USING fts(title, content)";
+        let stmts = parse(sql).unwrap();
+        assert_eq!(stmts.len(), 1);
+        
+        match &stmts[0] {
+            Statement::CreateVirtualTable(stmt) => {
+                assert_eq!(stmt.name, "articles");
+                assert_eq!(stmt.columns, vec!["title", "content"]);
+            }
+            _ => panic!("expected CreateVirtualTable"),
+        }
+    }
+}
                 let alias = if self.maybe(&Token::As) {
                     Some(self.eat_ident()?)
                 } else if let Token::Ident(_) = self.peek() {
@@ -411,6 +426,14 @@ impl Parser {
     fn parse_create(&mut self) -> Result<Statement, String> {
         self.eat(&Token::Create)?;
         let unique = self.maybe(&Token::Unique);
+        
+        // Handle CREATE VIRTUAL TABLE for FTS
+        if self.check(&Token::Virtual) {
+            self.advance();
+            self.eat(&Token::Table)?;
+            return Ok(Statement::CreateVirtualTable(self.parse_create_virtual_table()?));
+        }
+        
         match self.peek().clone() {
             Token::Table => Ok(Statement::CreateTable(self.parse_create_table()?)),
             Token::Index => Ok(Statement::CreateIndex(self.parse_create_index(unique)?)),
@@ -555,6 +578,32 @@ impl Parser {
             }
             t => Err(format!("expected table constraint, got {:?}", t)),
         }
+    }
+
+    fn parse_create_virtual_table(&mut self) -> Result<CreateVirtualTableStmt, String> {
+        // table_name
+        let name = self.eat_ident()?;
+        
+        // USING fts(col1, col2, ...)
+        self.eat(&Token::Using)?;
+        
+        // Check for fts keyword
+        match self.peek().clone() {
+            Token::Ident(s) if s.eq_ignore_ascii_case("fts") => {
+                self.advance();
+            }
+            t => return Err(format!("expected fts, got {:?}", t)),
+        }
+        
+        self.eat(&Token::LParen)?;
+        let columns = self.parse_ident_list()?;
+        self.eat(&Token::RParen)?;
+        
+        Ok(CreateVirtualTableStmt {
+            if_not_exists: false,
+            name,
+            columns,
+        })
     }
 
     fn parse_create_index(&mut self, unique: bool) -> Result<CreateIndexStmt, String> {
@@ -969,6 +1018,21 @@ impl Parser {
         if self.maybe(&Token::GLOB) {
             let pattern = self.parse_addition()?;
             return Ok(Expr::Glob { expr: Box::new(left), pattern: Box::new(pattern), negated: negated_glob });
+        }
+
+        // FTS MATCH (table MATCH 'query')
+        if self.maybe(&Token::Match) {
+            let query = self.parse_addition()?;
+            // The left should be a column reference (table name)
+            let table_name = match &left {
+                Expr::Column { name, .. } => name.clone(),
+                _ => return Err("MATCH requires table name".into()),
+            };
+            let query_str = match query {
+                Expr::LitStr(s) => s,
+                _ => return Err("MATCH requires string query".into()),
+            };
+            return Ok(Expr::Match { table: table_name, query: query_str });
         }
 
         // 比較運算子
@@ -1453,5 +1517,44 @@ mod tests {
         if let Statement::Explain(s) = &stmts[0] {
             assert!(matches!(s.inner.as_ref(), Statement::Select(_)));
         } else { panic!("expected Explain") }
+    }
+
+    #[test]
+    fn create_virtual_table() {
+        let sql = "CREATE VIRTUAL TABLE articles USING fts(title, content)";
+        let stmts = parse(sql).unwrap_or_else(|e| panic!("parse error: {}", e));
+        assert_eq!(stmts.len(), 1);
+        
+        match &stmts[0] {
+            Statement::CreateVirtualTable(stmt) => {
+                assert_eq!(stmt.name, "articles");
+                assert_eq!(stmt.columns, vec!["title", "content"]);
+            }
+            _ => panic!("expected CreateVirtualTable"),
+        }
+    }
+
+    #[test]
+    fn fts_match() {
+        let sql = "SELECT * FROM articles WHERE articles MATCH 'search term'";
+        let stmts = parse(sql).unwrap_or_else(|e| panic!("parse error: {}", e));
+        assert_eq!(stmts.len(), 1);
+        
+        match &stmts[0] {
+            Statement::Select(s) => {
+                if let Some(where_expr) = &s.where_ {
+                    match where_expr {
+                        Expr::Match { table, query } => {
+                            assert_eq!(table, "articles");
+                            assert_eq!(query, "search term");
+                        }
+                        _ => panic!("expected Match expression"),
+                    }
+                } else {
+                    panic!("expected WHERE clause");
+                }
+            }
+            _ => panic!("expected Select"),
+        }
     }
 }
