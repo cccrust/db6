@@ -19,6 +19,9 @@ pub enum Error {
     #[error("transaction error: {0}")]
     TransactionError(String),
 
+    #[error("transaction: {0}")]
+    Transaction(String),
+
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),
 

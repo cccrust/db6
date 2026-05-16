@@ -5,20 +5,36 @@
 ```bash
 cargo build    # Build library
 cargo test     # Run tests
+./test.sh      # Build + test with output
 ```
 
-## Architecture (KV-focused for v0.1)
+## Version Strategy
 
-- `src/engine/` — Storage engines: `memory.rs`, `btree.rs`, `lsm.rs`
+- **v0.x**: KV layer only (StorageEngine + 3 engines)
+- **v1.0+**: Add SQL layer
+
+## Architecture
+
+- `src/engine/` — Storage engines: `memory.rs`, `btree/`, `lsm.rs`
 - `src/kv/` — `KvStore`, `Transactional`, `Persistent` traits
-- `src/sql/` — SQL parser/planner/executor (basic, needs more work)
-- `src/fts/` — FTS stub (minimal implementation)
+- `src/sql/` — SQL stub (ignored until v1.0)
+- `src/fts/` — FTS stub (ignored until v1.0)
+
+## Status (v0.2)
+
+| Component | Status |
+|-----------|--------|
+| StorageEngine trait | ✅ Done |
+| MemoryEngine | ✅ Done |
+| BTreeEngine | ✅ Done |
+| LsmEngine | TODO |
+| KvStore trait | ✅ Done |
 
 ## Entry Point
 
 `src/lib.rs` exports:
 ```rust
-pub use engine::{EngineStats, StorageEngine};
+pub use engine::{EngineStats, StorageEngine, MemoryEngine, BTreeEngine};
 pub use kv::{KvStore, Transactional, Persistent};
 ```
 
@@ -26,14 +42,22 @@ pub use kv::{KvStore, Transactional, Persistent};
 
 - StorageEngine trait uses `where Self: Sized` for `open`/`open_memory` to be dyn compatible
 - Memory engine uses BTreeMap to support ORDER BY and range scans
+- BTreeEngine uses RwLock for thread safety
 - scan() uses `std::collections::Bound` for range queries
+- table_id parameter enables multi-table isolation
 
 ## Git Workflow
 
-`git.sh` automates commit + push: `./git.sh <message> <branch>`
+`./git.sh <message> <branch>` — commit + push
 
-## Development Notes
+## Testing
 
-- v0.1 focuses on KV layer only (SQL is basic stub)
-- See `_doc/v0.1.md` for current implementation status
-- See `_doc/plan.md` for full roadmap
+Run `./test.sh` or manually:
+```bash
+cargo build && cargo test
+```
+
+## Documentation
+
+- [_doc/v0.1.md](_doc/v0.1.md) — Current implementation status (v0.2)
+- [_doc/plan.md](_doc/plan.md) — Full roadmap
