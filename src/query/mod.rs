@@ -587,6 +587,16 @@ fn filter_rows(rows: Vec<(Vec<u8>, Vec<u8>)>, condition: &str) -> Vec<(Vec<u8>, 
 
     // Check for JSON path condition (starts with $)
     if condition.starts_with("$.") || condition.starts_with("$[") {
+        // Check if there are AND conditions to handle separately
+        if condition.contains(" AND ") {
+            // Split by AND and apply filter_json_path to each part
+            let parts: Vec<&str> = condition.split(" AND ").collect();
+            let mut result = rows;
+            for part in parts {
+                result = filter_json_path(result, part.trim());
+            }
+            return result;
+        }
         return filter_json_path(rows, condition);
     }
 

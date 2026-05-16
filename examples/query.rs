@@ -112,4 +112,123 @@ fn main() {
     println!("After delete: {} keys", db.table("users").scan(b"", b"").unwrap().len());
 
     println!("\n=== Done ===");
+
+    // 測試 6: JSON Filter (map / reduce / filter - Functional Programming)
+    println!("\n--- JSON Filter (Functional Programming: map / reduce / filter) ---");
+    let mut db = Db::new("memory").unwrap();
+
+    // 插入 JSON 資料
+    db.table("users")
+        .put(b"1", r#"{"name":"Alice","age":30,"city":"Taipei"}"#.as_bytes())
+        .unwrap();
+    db.table("users")
+        .put(b"2", r#"{"name":"Bob","age":25,"city":"Kaohsiung"}"#.as_bytes())
+        .unwrap();
+    db.table("users")
+        .put(b"3", r#"{"name":"Charlie","age":35,"city":"Taipei"}"#.as_bytes())
+        .unwrap();
+    db.table("users")
+        .put(b"4", r#"{"name":"Diana","age":28,"city":"Taichung"}"#.as_bytes())
+        .unwrap();
+
+    // Filter: 過濾 JSON 欄位
+    println!("\n// Filter: age > 27");
+    let result = db.select("*")
+        .from("users")
+        .filter("$.age > 27")
+        .execute()
+        .unwrap();
+    println!("Users with age > 27:");
+    for row in &result.rows {
+        println!("  {:?}", row[1]);
+    }
+
+    // Filter: 巢狀路徑
+    println!("\n// Filter: nested path $.city = 'Taipei'");
+    let result = db.select("*")
+        .from("users")
+        .filter("$.city = 'Taipei'")
+        .execute()
+        .unwrap();
+    println!("Users in Taipei:");
+    for row in &result.rows {
+        println!("  {:?}", row[1]);
+    }
+
+    // Filter: LIKE 模糊匹配
+    println!("\n// Filter: name LIKE 'C%'");
+    let result = db.select("*")
+        .from("users")
+        .filter("$.name LIKE 'C%'")
+        .execute()
+        .unwrap();
+    println!("Users with name starting with C:");
+    for row in &result.rows {
+        println!("  {:?}", row[1]);
+    }
+
+    // Filter: where_() 別名（與 filter() 行為相同）
+    println!("\n// where_: age < 30 (same as filter)");
+    let result = db.select("*")
+        .from("users")
+        .where_("$.age < 30")
+        .execute()
+        .unwrap();
+    println!("Users with age < 30:");
+    for row in &result.rows {
+        println!("  {:?}", row[1]);
+    }
+
+    // Map: 轉換資料
+    println!("\n// Map: transform all names to uppercase");
+    let result = db.table("users")
+        .map(|k, v| {
+            let mut json: serde_json::Value = serde_json::from_slice(v).unwrap();
+            if let Some(name) = json["name"].as_str() {
+                json["name"] = serde_json::Value::String(name.to_uppercase());
+            }
+            (k.to_vec(), serde_json::to_string(&json).unwrap().into_bytes())
+        })
+        .unwrap()
+        .execute()
+        .unwrap();
+    println!("Users with uppercase names:");
+    for (k, v) in &result {
+        println!("  {}: {:?}", String::from_utf8_lossy(k), String::from_utf8_lossy(v));
+    }
+
+    // Reduce: 聚合計數
+    println!("\n// Reduce: count users");
+    let result = db.table("users")
+        .map(|k, v| (k.to_vec(), v.to_vec()))
+        .unwrap()
+        .reduce(|acc, _, _| {
+            let count = if acc.is_empty() {
+                0
+            } else {
+                String::from_utf8_lossy(&acc).parse::<usize>().unwrap_or(0)
+            };
+            (count + 1).to_string().into_bytes()
+        })
+        .execute()
+        .unwrap();
+    if !result.is_empty() {
+        let count = String::from_utf8_lossy(&result[0].1).parse::<usize>().unwrap_or(0);
+        println!("Total users: {}", count);
+    }
+
+    // Combine: Map + Filter + Reduce
+    println!("\n// Combine: Filter with AND");
+    println!("Count users in Taipei with age > 27:");
+    let result = db.select("*")
+        .from("users")
+        .filter("$.city = 'Taipei' AND $.age > 27")
+        .execute()
+        .unwrap();
+    println!("Filtered count: {}", result.rows.len());
+    for row in &result.rows {
+        println!("  {:?}", row[1]);
+    }
+
+    println!("\n=== Done ===");
 }
