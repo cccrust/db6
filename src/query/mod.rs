@@ -3,8 +3,9 @@
 //! 提供 Method Chaining 風格的 API for KV and SQL operations.
 
 use std::path::Path;
+use crate::engine::StorageEngine;
 use crate::error::{Error, Result};
-use crate::kv::{KvStore as KvApi, KvEngine};
+use crate::kv::KvEngine;
 use crate::sql::ResultSet;
 
 /// Db 主入口
@@ -96,8 +97,29 @@ impl Db {
         }
     }
 
+    /// Transaction fluent interface
+    pub fn begin_tx(&mut self) -> TransactionQuery<'_> {
+        self.engine.begin_transaction().ok();
+        TransactionQuery { db: self }
+    }
+
     pub fn engine_type(&self) -> &'static str {
         self.engine.engine_type()
+    }
+}
+
+/// Transaction fluent interface
+pub struct TransactionQuery<'a> {
+    db: &'a mut Db,
+}
+
+impl<'a> TransactionQuery<'a> {
+    pub fn commit(mut self) -> Result<()> {
+        self.db.engine.commit_transaction()
+    }
+
+    pub fn rollback(mut self) -> Result<()> {
+        self.db.engine.rollback_transaction()
     }
 }
 
@@ -370,26 +392,64 @@ impl<'a> SelectQuery<'a> {
 
 /// Filter rows based on WHERE condition
 /// Supports: key = value, key > value, key >= value, key < value, key <= value, key != value, key LIKE pattern
+/// Supports AND/OR combinations: "value = Bob AND key > 1" or "value = Bob OR key < 3"
 fn filter_rows(rows: Vec<(Vec<u8>, Vec<u8>)>, condition: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
     let condition = condition.trim();
-    
-    // Parse condition: "key op value"
+
+    // Check for AND/OR operators
+    let has_and = condition.contains(" AND ");
+    let has_or = condition.contains(" OR ");
+
+    if has_and {
+        // Split by AND and apply each condition
+        let parts: Vec<&str> = condition.split(" AND ").collect();
+        let mut result = rows;
+        for part in parts {
+            result = filter_single_condition(result, part.trim());
+        }
+        return result;
+    }
+
+    if has_or {
+        // Split by OR and union results
+        let parts: Vec<&str> = condition.split(" OR ").collect();
+        let mut result: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+        let mut seen: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+        for part in parts {
+            let filtered = filter_single_condition(rows.clone(), part.trim());
+            for row in filtered {
+                if seen.insert(row.0.clone()) {
+                    result.push(row);
+                }
+            }
+        }
+        return result;
+    }
+
+    // Single condition
+    filter_single_condition(rows, condition)
+}
+
+fn filter_single_condition(rows: Vec<(Vec<u8>, Vec<u8>)>, condition: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let condition = condition.trim();
+
+    // Parse condition: "field op value"
     let parts: Vec<&str> = condition.split_whitespace().collect();
     if parts.len() < 3 {
         return rows;
     }
-    
+
     let field = parts[0];
     let op = parts[1];
     let value_str = parts[2..].join(" ");
-    
+
     rows.into_iter().filter(|(k, v)| {
         let field_val = if field == "key" {
             String::from_utf8_lossy(k).to_string()
         } else {
             String::from_utf8_lossy(v).to_string()
         };
-        
+
         match op {
             "=" | "==" => field_val == value_str,
             "!=" => field_val != value_str,
@@ -521,5 +581,80 @@ mod tests {
         assert_eq!(count, 1);
         // Now row with key="2" has value="Robert"
         assert_eq!(db.table("users").get(b"2").unwrap(), Some(b"Robert".to_vec()));
+    }
+
+    #[test]
+    fn test_transaction_commit() {
+        let temp_dir = std::env::temp_dir().join("db6_tx_test");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        let mut db = Db::open("lsm", &temp_dir).unwrap();
+        db.table("users").put(b"1", b"Alice").unwrap();
+
+        db.begin_tx()
+            .commit()
+            .unwrap();
+
+        assert_eq!(db.table("users").get(b"1").unwrap(), Some(b"Alice".to_vec()));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_transaction_rollback() {
+        let temp_dir = std::env::temp_dir().join("db6_tx_test2");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        let mut db = Db::open("lsm", &temp_dir).unwrap();
+        db.table("users").put(b"1", b"Alice").unwrap();
+        db.table("users").put(b"2", b"Bob").unwrap();
+
+        db.begin_tx()
+            .rollback()
+            .unwrap();
+
+        // After rollback, all data should still exist
+        assert_eq!(db.table("users").get(b"2").unwrap(), Some(b"Bob".to_vec()));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_where_and() {
+        let mut db = Db::new("memory").unwrap();
+        db.table("users").put(b"1", b"Alice").unwrap();
+        db.table("users").put(b"2", b"Bob").unwrap();
+        db.table("users").put(b"3", b"Charlie").unwrap();
+
+        // WHERE key = 2 AND value = Bob
+        let result = db.select("key, value")
+            .from("users")
+            .where_("key = 2 AND value = Bob")
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0][0], "2");
+        assert_eq!(result.rows[0][1], "Bob");
+    }
+
+    #[test]
+    fn test_where_or() {
+        let mut db = Db::new("memory").unwrap();
+        db.table("users").put(b"1", b"Alice").unwrap();
+        db.table("users").put(b"2", b"Bob").unwrap();
+        db.table("users").put(b"3", b"Charlie").unwrap();
+
+        // WHERE key = 1 OR value = Charlie
+        let result = db.select("key, value")
+            .from("users")
+            .where_("key = 1 OR value = Charlie")
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.rows.len(), 2);
+        let keys: Vec<&str> = result.rows.iter().map(|r| r[0].as_str()).collect();
+        assert!(keys.contains(&"1"));
+        assert!(keys.contains(&"3"));
     }
 }
