@@ -63,10 +63,10 @@ impl Executor {
             vec!["key".to_string(), "value".to_string()]
         } else {
             select.columns.iter().filter_map(|c| {
-                if let crate::sql::parser::ast::Expr::Column(s) = c {
-                    Some(s.clone())
-                } else {
-                    None
+                match c {
+                    crate::sql::parser::ast::SelectItem::Star => Some("*".to_string()),
+                    crate::sql::parser::ast::SelectItem::TableStar(t) => Some(format!("{}.*", t)),
+                    crate::sql::parser::ast::SelectItem::Expr { alias, .. } => alias.clone(),
                 }
             }).collect()
         };
@@ -92,13 +92,10 @@ impl Executor {
         for row in &insert.values {
             if let Some(expr) = row.first() {
                 let value = match expr {
-                    crate::sql::parser::ast::Expr::Literal(l) => match l {
-                        crate::sql::parser::ast::Literal::Text(s) => s.clone(),
-                        crate::sql::parser::ast::Literal::Integer(i) => i.to_string(),
-                        crate::sql::parser::ast::Literal::Real(r) => r.to_string(),
-                        crate::sql::parser::ast::Literal::Null => String::new(),
-                        crate::sql::parser::ast::Literal::Blob(b) => format!("{:x?}", b),
-                    },
+                    crate::sql::parser::ast::Expr::LitStr(s) => s.clone(),
+                    crate::sql::parser::ast::Expr::LitInt(i) => i.to_string(),
+                    crate::sql::parser::ast::Expr::LitFloat(f) => f.to_string(),
+                    crate::sql::parser::ast::Expr::LitNull => String::new(),
                     _ => "".to_string(),
                 };
                 let key = format!("{}:{}", table, affected);

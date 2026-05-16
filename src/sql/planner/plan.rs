@@ -1,9 +1,8 @@
 //! Query plan nodes（移植自 sql6/src/planner/plan.rs）
 
-use serde::{Deserialize, Serialize};
 use crate::sql::parser::ast::{Expr, SelectStmt};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum Plan {
     Scan(ScanPlan),
     Insert(InsertPlan),
@@ -15,50 +14,50 @@ pub enum Plan {
     Empty,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ScanPlan {
     pub table: String,
     pub filter: Option<Expr>,
-    pub order_by: Vec<crate::sql::parser::ast::OrderBy>,
+    pub order_by: Vec<crate::sql::parser::ast::OrderItem>,
     pub limit: Option<i64>,
     pub is_fts: bool,
     pub fts_query: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct InsertPlan {
     pub table: String,
     pub values: Vec<Vec<Expr>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct UpdatePlan {
     pub table: String,
     pub set: Vec<(String, Expr)>,
     pub filter: Option<Expr>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct DeletePlan {
     pub table: String,
     pub filter: Option<Expr>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct CreateTablePlan {
     pub name: String,
     pub columns: Vec<crate::sql::parser::ast::ColumnDef>,
     pub if_not_exists: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct FtsPlan {
     pub name: String,
     pub columns: Vec<crate::sql::parser::ast::ColumnDef>,
     pub tokenize: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct DropTablePlan {
     pub name: String,
     pub if_exists: bool,
