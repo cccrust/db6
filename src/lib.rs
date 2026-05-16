@@ -14,9 +14,11 @@ pub mod error;
 pub mod sql;
 pub mod fts;
 pub mod kv;
+pub mod query;
 
 pub use engine::{EngineStats, StorageEngine, KvStore, CanOrderBy, CanJoin, CanFts, CanTransaction, CanScan, CanBatch};
 pub use kv::{KvStore as KvApi, KvEngine};
+pub use query::Db;
 pub use error::{Error, Result};
 pub use fts::{FtsIndex, FtsTokenizer, CjkTokenizer, EnglishTokenizer};
 pub use sql::{parse, Executor, ResultSet, SqlExecutor};

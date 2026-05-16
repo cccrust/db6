@@ -1,8 +1,8 @@
 [package]
 name = "db6"
-version = "2.12.0"
+version = "3.0.0"
 edition = "2021"
-description = "Unified database with pluggable storage engines (Memory/BTree/LSM) (KV + SQL + FTS"
+description = "Unified database with pluggable storage engines (Memory/BTree/LSM) (KV + SQL + FTS)"
 
 [[bin]]
 name = "db6"

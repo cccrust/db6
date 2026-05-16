@@ -48,6 +48,7 @@
     * sql 語法經常被 mapping 為 Fluent Interface 語法風格
     * kv 的 query ，也能被 db.select().where() 這樣的語法延伸使用。
     * 加入 query/ 模組，擴充 kv ，然後也能讓後端用 btree 支援 order , group 等功能。
+    * 把 fts 功能也放入 query/ 中
 
 
 ## 工具呼叫穩定性協議（防止生成中斷）
