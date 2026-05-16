@@ -1,18 +1,28 @@
 //! Query Module - Fluent Interface
-//! 
+//!
 //! 提供 Method Chaining 風格的 API for KV and SQL operations.
 
+use std::collections::HashMap;
 use std::path::Path;
 use crate::engine::StorageEngine;
 use crate::error::{Error, Result};
 use crate::kv::KvEngine;
 use crate::sql::ResultSet;
 
+const INDEX_TABLE_ID: u32 = u32::MAX - 1;
+
+#[derive(Clone)]
+struct IndexDef {
+    table_id: u32,
+    json_path: String,
+}
+
 /// Db 主入口
 pub struct Db {
     engine: KvEngine,
-    table_map: std::collections::HashMap<String, u32>,
+    table_map: HashMap<String, u32>,
     next_table_id: u32,
+    index_defs: HashMap<String, IndexDef>,
 }
 
 impl Db {
@@ -20,8 +30,9 @@ impl Db {
     pub fn new(engine_type: &str) -> Result<Self> {
         Ok(Db {
             engine: KvEngine::new(engine_type)?,
-            table_map: std::collections::HashMap::new(),
+            table_map: HashMap::new(),
             next_table_id: 1,
+            index_defs: HashMap::new(),
         })
     }
 
@@ -29,8 +40,9 @@ impl Db {
     pub fn open(engine_type: &str, path: &Path) -> Result<Self> {
         Ok(Db {
             engine: KvEngine::open(engine_type, path)?,
-            table_map: std::collections::HashMap::new(),
+            table_map: HashMap::new(),
             next_table_id: 1,
+            index_defs: HashMap::new(),
         })
     }
 
@@ -119,6 +131,125 @@ impl Db {
     pub fn engine_type(&self) -> &'static str {
         self.engine.engine_type()
     }
+
+    pub fn create_index(&mut self, table: &str, json_path: &str) -> Result<()> {
+        let table_id = self.get_table_id(table);
+        let index_key = format!("{}:{}", table, json_path);
+
+        if self.index_defs.contains_key(&index_key) {
+            return Err(Error::Sql(format!("Index on {}.{} already exists", table, json_path)));
+        }
+
+        self.index_defs.insert(index_key.clone(), IndexDef {
+            table_id,
+            json_path: json_path.to_string(),
+        });
+
+        let rows = self.engine.scan(table_id, b"", b"")?;
+        for (key, value) in rows {
+            self.update_index_put(table_id, json_path, &key, &value)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn drop_index(&mut self, table: &str, json_path: &str) -> Result<()> {
+        let index_key = format!("{}:{}", table, json_path);
+        let index_def = self.index_defs.remove(&index_key)
+            .ok_or_else(|| Error::Sql(format!("Index on {}.{} does not exist", table, json_path)))?;
+
+        let prefix = format!("idx:{}:{}:", index_def.table_id, json_path);
+        let prefix_bytes = prefix.as_bytes();
+        let mut end = prefix_bytes.to_vec();
+        end.push(b'\xFF');
+
+        self.engine.range_delete(INDEX_TABLE_ID, prefix_bytes, &end)?;
+
+        Ok(())
+    }
+
+    pub fn indexes(&mut self, table: &str) -> Result<Vec<String>> {
+        let table_id = self.get_table_id(table);
+        let mut result = Vec::new();
+        for (key, def) in &self.index_defs {
+            if def.table_id == table_id {
+                if let Some(path) = key.strip_prefix(&format!("{}:", table)) {
+                    result.push(path.to_string());
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    fn find_index(&mut self, table_id: u32, json_path: &str) -> Option<&IndexDef> {
+        for def in self.index_defs.values() {
+            if def.table_id == table_id && def.json_path == json_path {
+                return Some(def);
+            }
+        }
+        None
+    }
+
+    fn update_index_put(&mut self, table_id: u32, json_path: &str, key: &[u8], value: &[u8]) -> Result<()> {
+        let json_str = String::from_utf8_lossy(value);
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            let path = json_path.trim_start_matches("$.");
+            if let Some(field_value) = json_path_get(&json, &format!("$.{}", path)) {
+                let field_str = field_value.to_string();
+                let index_key = format!("idx:{}:{}:{}:{}", table_id, json_path, field_str, String::from_utf8_lossy(key));
+                self.engine.put(INDEX_TABLE_ID, index_key.as_bytes(), b"")?;
+            }
+        }
+        Ok(())
+    }
+
+    fn update_index_delete(&mut self, table_id: u32, json_path: &str, key: &[u8], value: &[u8]) -> Result<()> {
+        let json_str = String::from_utf8_lossy(value);
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            let path = json_path.trim_start_matches("$.");
+            if let Some(field_value) = json_path_get(&json, &format!("$.{}", path)) {
+                let field_str = field_value.to_string();
+                let index_key = format!("idx:{}:{}:{}:{}", table_id, json_path, field_str, String::from_utf8_lossy(key));
+                self.engine.delete(INDEX_TABLE_ID, index_key.as_bytes())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn get_index_keys_for_range(&mut self, table_id: u32, json_path: &str, op: &str, value: &str) -> Result<Vec<Vec<u8>>> {
+        let prefix = format!("idx:{}:{}:", table_id, json_path);
+        let prefix_bytes = prefix.as_bytes();
+
+        let start: Vec<u8> = if op == ">" || op == ">=" {
+            let full_start = if op == ">=" {
+                format!("{}{}", prefix, value)
+            } else {
+                format!("{}{}", prefix, value)
+            };
+            full_start.into_bytes()
+        } else {
+            prefix_bytes.to_vec()
+        };
+
+        let end: Vec<u8> = if op == "<" || op == "<=" {
+            let full_end = format!("{}{}", prefix, value);
+            let mut e = full_end.into_bytes();
+            e.push(b'\xff');
+            e
+        } else {
+            let mut e = prefix_bytes.to_vec();
+            e.push(b'\xff');
+            e
+        };
+
+        let entries = self.engine.scan(INDEX_TABLE_ID, &start, &end)?;
+        let keys: Vec<Vec<u8>> = entries.iter().filter_map(|e| {
+            let full_key = String::from_utf8_lossy(&e.0);
+            full_key.rsplit(':').next().map(|k| k.as_bytes().to_vec())
+        }).collect();
+
+        Ok(keys)
+    }
 }
 
 /// Transaction fluent interface
@@ -146,6 +277,13 @@ pub struct TableQuery<'a> {
 impl<'a> TableQuery<'a> {
     pub fn put(&mut self, key: &[u8], value: &[u8]) -> Result<&mut Self> {
         self.db.engine.put(self.table_id, key, value)?;
+        let index_paths: Vec<String> = self.db.index_defs.values()
+            .filter(|def| def.table_id == self.table_id)
+            .map(|def| def.json_path.clone())
+            .collect();
+        for json_path in index_paths {
+            self.db.update_index_put(self.table_id, &json_path, key, value)?;
+        }
         Ok(self)
     }
 
@@ -158,12 +296,30 @@ impl<'a> TableQuery<'a> {
     }
 
     pub fn delete(&mut self, key: &[u8]) -> Result<&mut Self> {
+        if let Ok(Some(value)) = self.db.engine.get(self.table_id, key) {
+            let index_paths: Vec<String> = self.db.index_defs.values()
+                .filter(|def| def.table_id == self.table_id)
+                .map(|def| def.json_path.clone())
+                .collect();
+            for json_path in index_paths {
+                self.db.update_index_delete(self.table_id, &json_path, key, &value)?;
+            }
+        }
         self.db.engine.delete(self.table_id, key)?;
         Ok(self)
     }
 
     pub fn batch_put(&mut self, pairs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<&mut Self> {
-        self.db.engine.batch_put(self.table_id, pairs)?;
+        self.db.engine.batch_put(self.table_id, pairs.clone())?;
+        let index_paths: Vec<String> = self.db.index_defs.values()
+            .filter(|def| def.table_id == self.table_id)
+            .map(|def| def.json_path.clone())
+            .collect();
+        for (key, value) in pairs {
+            for json_path in &index_paths {
+                self.db.update_index_put(self.table_id, json_path, &key, &value)?;
+            }
+        }
         Ok(self)
     }
 
@@ -267,7 +423,7 @@ impl<'a> DeleteQuery<'a> {
 
         let rows = self.db.engine.scan(table_id, b"", b"")?;
         let filtered = match &self.where_clause {
-            Some(cond) => filter_rows(rows, cond),
+            Some(cond) => filter_rows(self.db, table_id, rows, cond),
             None => rows,
         };
 
@@ -307,7 +463,7 @@ impl<'a> UpdateQuery<'a> {
 
         let rows = self.db.engine.scan(table_id, b"", b"")?;
         let filtered = match &self.where_clause {
-            Some(cond) => filter_rows(rows, cond),
+            Some(cond) => filter_rows(self.db, table_id, rows, cond),
             None => rows,
         };
 
@@ -437,37 +593,34 @@ impl<'a> SelectQuery<'a> {
 
     /// Execute query
     pub fn execute(&mut self) -> Result<ResultSet> {
-        // Check GROUP BY capability BEFORE taking db
         if let Some(ref group_field) = self.group_by {
             self.requires_group_by_capability()?;
         }
 
-        let db = self.db.take().ok_or_else(|| Error::Sql("DB not available".into()))?;
+        let db = match &mut self.db {
+            Some(db) => db,
+            None => return Err(Error::Sql("DB not available".into())),
+        };
 
         let table_name = self.from.as_ref()
             .ok_or_else(|| Error::Sql("No table specified".into()))?;
 
         let table_id = db.get_table_id(table_name);
 
-        // Scan all data
         let mut rows = db.engine.scan(table_id, b"", b"")?;
 
-        // Apply WHERE filtering
         if let Some(ref where_cond) = self.where_clause {
-            rows = filter_rows(rows, where_cond);
+            rows = filter_rows(db, table_id, rows, where_cond);
         }
 
-        // Apply GROUP BY
         if let Some(ref group_field) = self.group_by {
             rows = apply_group_by(rows, group_field, &self.columns)?;
         }
 
-        // Apply HAVING (filter grouped results)
         if let Some(ref having_cond) = self.having {
-            rows = filter_rows(rows, having_cond);
+            rows = filter_rows(db, table_id, rows, having_cond);
         }
 
-        // Apply ORDER BY
         if self.order_by.is_some() && db.engine.engine_type() != "memory-hash" {
             rows.sort_by(|a, b| a.0.cmp(&b.0));
         }
@@ -582,30 +735,25 @@ fn apply_group_by(rows: Vec<(Vec<u8>, Vec<u8>)>, group_field: &str, columns: &st
 /// Supports: key = value, key > value, key >= value, key < value, key <= value, key != value, key LIKE pattern
 /// Supports AND/OR combinations: "value = Bob AND key > 1" or "value = Bob OR key < 3"
 /// Supports JSON path: "$.field > 25" (filters JSON in value column)
-fn filter_rows(rows: Vec<(Vec<u8>, Vec<u8>)>, condition: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
+fn filter_rows(db: &mut Db, table_id: u32, rows: Vec<(Vec<u8>, Vec<u8>)>, condition: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
     let condition = condition.trim();
 
-    // Check for JSON path condition (starts with $)
     if condition.starts_with("$.") || condition.starts_with("$[") {
-        // Check if there are AND conditions to handle separately
         if condition.contains(" AND ") {
-            // Split by AND and apply filter_json_path to each part
             let parts: Vec<&str> = condition.split(" AND ").collect();
             let mut result = rows;
             for part in parts {
-                result = filter_json_path(result, part.trim());
+                result = filter_json_path_with_index(db, table_id, result, part.trim());
             }
             return result;
         }
-        return filter_json_path(rows, condition);
+        return filter_json_path_with_index(db, table_id, rows, condition);
     }
 
-    // Check for AND/OR operators
     let has_and = condition.contains(" AND ");
     let has_or = condition.contains(" OR ");
 
     if has_and {
-        // Split by AND and apply each condition
         let parts: Vec<&str> = condition.split(" AND ").collect();
         let mut result = rows;
         for part in parts {
@@ -615,7 +763,6 @@ fn filter_rows(rows: Vec<(Vec<u8>, Vec<u8>)>, condition: &str) -> Vec<(Vec<u8>, 
     }
 
     if has_or {
-        // Split by OR and union results
         let parts: Vec<&str> = condition.split(" OR ").collect();
         let mut result: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
         let mut seen: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
@@ -630,7 +777,6 @@ fn filter_rows(rows: Vec<(Vec<u8>, Vec<u8>)>, condition: &str) -> Vec<(Vec<u8>, 
         return result;
     }
 
-    // Single condition
     filter_single_condition(rows, condition)
 }
 
@@ -678,46 +824,53 @@ fn filter_single_condition(rows: Vec<(Vec<u8>, Vec<u8>)>, condition: &str) -> Ve
     }).collect()
 }
 
-/// Filter rows based on JSON path condition
+/// Filter rows based on JSON path condition with index support
 /// Syntax: "$.field op value" or "$.nested.field op value"
 /// Example: "$.age > 25" filters rows where JSON value's age > 25
-fn filter_json_path(rows: Vec<(Vec<u8>, Vec<u8>)>, condition: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
+fn filter_json_path_with_index(db: &mut Db, table_id: u32, rows: Vec<(Vec<u8>, Vec<u8>)>, condition: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
     let condition = condition.trim();
 
-    // Parse: "$.path op value" or "$.path[0] op value"
-    // Examples:
-    //   "$.age > 25"
-    //   "$.name = 'Alice'"
-    //   "$.address.city = 'Taipei'"
-
-    // Find the operator and split
     let (path, op, value_str) = parse_json_condition(condition);
+    let clean_value = value_str.trim_matches(|c| c == '\'' || c == '"');
+
+    if let Some(_index_def) = db.find_index(table_id, &path) {
+        if matches!(op.as_str(), "=" | ">" | ">=" | "<" | "<=") {
+            if let Ok(index_keys) = db.get_index_keys_for_range(table_id, &path, &op, clean_value) {
+                if !index_keys.is_empty() {
+                    let key_set: std::collections::HashSet<Vec<u8>> = index_keys.iter().cloned().collect();
+                    let filtered: Vec<(Vec<u8>, Vec<u8>)> = rows.iter()
+                        .filter(|(k, _)| key_set.contains(k))
+                        .cloned()
+                        .collect();
+                    if !filtered.is_empty() {
+                        return filtered;
+                    }
+                }
+            }
+        }
+    }
 
     rows.into_iter().filter(|(k, v)| {
         let json_str = String::from_utf8_lossy(v);
 
-        // Parse JSON
         let json: serde_json::Value = match serde_json::from_str(&json_str) {
             Ok(j) => j,
             Err(_) => return false,
         };
 
-        // Extract value at path
         let json_value = json_path_get(&json, &path);
 
         match json_value {
             Some(jv) => {
                 let jv_str = jv.to_string();
 
-                // Remove surrounding quotes for string comparison
-                let compare_val = value_str.trim_matches(|c| c == '\'' || c == '"');
+                let compare_val = clean_value;
                 let compare_with = jv_str.trim_matches('"');
 
                 match op.as_str() {
                     "=" | "==" => compare_with == compare_val,
                     "!=" => compare_with != compare_val,
                     ">" => {
-                        // Try numeric comparison first
                         if let (Ok(a), Ok(b)) = (compare_with.parse::<f64>(), compare_val.parse::<f64>()) {
                             a > b
                         } else {
@@ -1383,5 +1536,108 @@ mod tests {
 
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0][0], "1");
+    }
+
+    #[test]
+    fn test_index_basic() {
+        let mut db = Db::new("btree").unwrap();
+
+        db.create_index("users", "age").unwrap();
+
+        db.table("users").put(b"1", r#"{"name":"Alice","age":30}"#.as_bytes()).unwrap();
+        db.table("users").put(b"2", r#"{"name":"Bob","age":25}"#.as_bytes()).unwrap();
+        db.table("users").put(b"3", r#"{"name":"Charlie","age":35}"#.as_bytes()).unwrap();
+
+        let result = db.select("*")
+            .from("users")
+            .filter("$.age > 27")
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_index_on_drop() {
+        let mut db = Db::new("btree").unwrap();
+
+        db.create_index("users", "age").unwrap();
+        db.table("users").put(b"1", r#"{"name":"Alice","age":30}"#.as_bytes()).unwrap();
+
+        db.table("users").delete(b"1").unwrap();
+
+        let result = db.select("*")
+            .from("users")
+            .filter("$.age > 25")
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.rows.len(), 0);
+    }
+
+    #[test]
+    fn test_index_list() {
+        let mut db = Db::new("btree").unwrap();
+
+        db.create_index("users", "age").unwrap();
+        db.create_index("users", "city").unwrap();
+
+        let indexes = db.indexes("users").unwrap();
+        assert_eq!(indexes.len(), 2);
+        assert!(indexes.contains(&"age".to_string()));
+        assert!(indexes.contains(&"city".to_string()));
+    }
+
+    #[test]
+    fn test_index_multiple() {
+        let mut db = Db::new("btree").unwrap();
+
+        db.create_index("users", "age").unwrap();
+        db.create_index("users", "name").unwrap();
+
+        db.table("users").put(b"1", r#"{"name":"Alice","age":30}"#.as_bytes()).unwrap();
+        db.table("users").put(b"2", r#"{"name":"Bob","age":25}"#.as_bytes()).unwrap();
+        db.table("users").put(b"3", r#"{"name":"Charlie","age":35}"#.as_bytes()).unwrap();
+
+        let result = db.select("*")
+            .from("users")
+            .filter("$.name = 'Alice'")
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0][0], "1");
+    }
+
+    #[test]
+    fn test_index_with_equal_condition() {
+        let mut db = Db::new("btree").unwrap();
+
+        db.create_index("users", "age").unwrap();
+
+        db.table("users").put(b"1", r#"{"name":"Alice","age":30}"#.as_bytes()).unwrap();
+        db.table("users").put(b"2", r#"{"name":"Bob","age":25}"#.as_bytes()).unwrap();
+        db.table("users").put(b"3", r#"{"name":"Charlie","age":30}"#.as_bytes()).unwrap();
+
+        let result = db.select("*")
+            .from("users")
+            .filter("$.age = 30")
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_drop_index() {
+        let mut db = Db::new("btree").unwrap();
+
+        db.create_index("users", "age").unwrap();
+        db.table("users").put(b"1", r#"{"name":"Alice","age":30}"#.as_bytes()).unwrap();
+
+        db.drop_index("users", "age").unwrap();
+
+        let indexes = db.indexes("users").unwrap();
+        assert!(indexes.is_empty());
     }
 }
