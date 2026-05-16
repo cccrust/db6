@@ -13,12 +13,12 @@
 7. 0.xx 版，先專注 kv ， 1.xx 版，加入 fts 全文檢索， 2.xx 版，加入 sql 。
 8. lsm , btree, memory, kv, fts, sql 等模組，必須要能被外部引用並呼叫之
     * 請在 examples/ 下寫出直接使用的範例
-9. 強化 lsm 模組（API 完整度，效能，穩定度)
-10. 強化 fts 模組（API 完整度，效能，穩定度)
-11. 強化 btree 模組（API 完整度，效能，穩定度)
-12. 強化 memory 模組（API 完整度，效能，穩定度)
-13. 強化後的 lsm , btree, memory, kv, fts, sql 等模組，必須要能被外部引用並呼叫之
-    * 請在 examples/ 下寫出直接使用的範例
+    * 強化 lsm 模組（API 完整度，效能，穩定度)
+    * 強化 fts 模組（API 完整度，效能，穩定度)
+    * 強化 btree 模組（API 完整度，效能，穩定度)
+    * 強化 memory 模組（API 完整度，效能，穩定度)
+    * 強化後的 lsm , btree, memory, kv, fts, sql 等模組，必須要能被外部引用並呼叫之
+    * 請在 examples/ 下寫出直接使用的範例，並寫出 test_examples.sh 測試結果的正確性
 
 ## 工具呼叫穩定性協議（防止生成中斷）
 - 當你透過類似 `<invoke name="edit">` 的方法進行大規模的程式碼修改時，如果預估程式碼內容可能會接近你的單次最大輸出 Token 限制（max output token limit），**請絕對不要嘗試一次發送整塊龐大的程式碼**。

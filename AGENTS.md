@@ -6,21 +6,20 @@
 cargo build    # Build library
 cargo test     # Run tests
 ./test.sh      # Build + test with output
+cargo run      # Run REPL
 ```
 
 ## Architecture
 
 - `src/engine/` — Storage engines: `memory.rs`, `btree/`, `lsm.rs`
-- `src/kv/` — `KvStore`, `Transactional`, `Persistent` traits
 - `src/fts/` — FTS (CjkTokenizer, EnglishTokenizer, FtsIndex)
-- `src/sql/` — SQL stub (minimal implementation)
+- `src/sql/` — SQL (Parser, Planner, Executor)
 
 ## Entry Point
 
 `src/lib.rs` exports:
 ```rust
-pub use engine::{EngineStats, StorageEngine, MemoryEngine, BTreeEngine, LsmEngine};
-pub use kv::{KvStore, Transactional, Persistent};
+pub use engine::{EngineStats, StorageEngine, KvStore, MemoryEngine, BTreeEngine, LsmEngine};
 pub use fts::{FtsIndex, CjkTokenizer, FtsTokenizer};
 pub use sql::{parse, Executor, ResultSet};
 ```
@@ -32,6 +31,16 @@ pub use sql::{parse, Executor, ResultSet};
 - BTreeEngine uses RwLock for thread safety
 - scan() uses `std::collections::Bound` for range queries
 - table_id parameter enables multi-table isolation
+- batch_put / range_delete for bulk operations
+
+## REPL Commands
+
+```bash
+.engine memory|btree|lsm  # Switch engine
+.read file.sql            # Execute SQL file
+.help                     # Show help
+.quit                     # Exit
+```
 
 ## Git Workflow
 
@@ -40,4 +49,6 @@ pub use sql::{parse, Executor, ResultSet};
 ## Documentation
 
 - [_doc/plan.md](_doc/plan.md) — Full roadmap
-- [_doc/v0.1.md](_doc/v0.1.md) through [_doc/v0.3.md](_doc/v0.3.md) — Version history
+- [_doc/v2.1.md](_doc/v2.1.md) — v2.1 完成項目
+- [_doc/v2.2.md](_doc/v2.2.md) — v2.2 完成項目
+- [_doc/v2.3.md](_doc/v2.3.md) — v2.3 完成項目（範例 + API 統一化）

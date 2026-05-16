@@ -14,7 +14,7 @@ fn create_engine(engine_type: &str) -> Option<Box<dyn StorageEngine>> {
 }
 
 fn main() {
-    println!("db6 v2.2.0 - Interactive SQL REPL");
+    println!("db6 v2.3.0 - Interactive SQL REPL");
     println!("Type '.quit' to exit, '.help' for commands\n");
 
     let mut engine_type = "memory".to_string();
