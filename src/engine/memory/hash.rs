@@ -163,3 +163,7 @@ mod tests {
         assert_eq!(engine.get(1, b"k2").unwrap(), Some(b"v2".to_vec()));
     }
 }
+
+// Capability implementations for HashMemoryEngine
+impl crate::engine::CanBatch for HashMemoryEngine {}
+impl crate::engine::CanFts for HashMemoryEngine {}

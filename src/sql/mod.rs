@@ -7,4 +7,4 @@ pub mod planner;
 pub mod executor;
 
 pub use parser::parse;
-pub use executor::{Executor, ResultSet};
+pub use executor::{Executor, ResultSet, SqlExecutor};

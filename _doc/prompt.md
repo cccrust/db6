@@ -23,8 +23,13 @@
     * 是否需要將 memory 分成兩版，一版像是 sqlite memory 支援 sql，另一版像是 redis 支援 kv
 * 要讓 kv, sql 前端都可以任意挑選後端 (btree/lsm/memory btree / memory hash) 
     * 但是有些功能 sql 不支援，使用時會提出錯誤（最好在編譯時期就能提出錯誤）
+* LSM 現在具備永久儲存於磁碟的功能了嗎？
+    * 
 * 目前 fts (fulltext) 還有什麼沒做的呢？
-
+    * fts 應該有一組 API 應該和使用什麼儲存體無關
+    *  (btree/lsm/memory btree / memory hash) 
+* BTree 現在具備永久儲存於磁碟的功能了嗎？
+    * 
     
 
 ## 工具呼叫穩定性協議（防止生成中斷）

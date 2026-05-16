@@ -9,10 +9,12 @@
 pub mod memory;
 pub mod btree;
 pub mod lsm;
+pub mod capability;
 
 pub use memory::{HashMemoryEngine, BTreeMemoryEngine};
 pub use btree::BTreeEngine;
 pub use lsm::LsmEngine;
+pub use capability::{CanOrderBy, CanJoin, CanFts, CanTransaction, CanScan, CanBatch};
 
 use crate::error::Result;
 

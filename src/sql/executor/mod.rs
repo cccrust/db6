@@ -5,4 +5,4 @@
 pub mod executor;
 pub mod transaction;
 
-pub use executor::{Executor, ResultSet};
+pub use executor::{Executor, ResultSet, SqlExecutor};

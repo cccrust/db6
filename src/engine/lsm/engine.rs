@@ -376,3 +376,8 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+// Capability implementations for LsmEngine
+impl crate::engine::CanScan for LsmEngine {}
+impl crate::engine::CanBatch for LsmEngine {}
+impl crate::engine::CanTransaction for LsmEngine {}

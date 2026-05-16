@@ -17,8 +17,8 @@ impl BTreeMemoryEngine {
         }
     }
 
-    fn table(&self, table_id: u32) -> &BTreeMap<Vec<u8>, Vec<u8>> {
-        self.tables.get(&table_id).unwrap()
+    fn table(&self, table_id: u32) -> Option<&BTreeMap<Vec<u8>, Vec<u8>>> {
+        self.tables.get(&table_id)
     }
 
     fn table_mut(&mut self, table_id: u32) -> &mut BTreeMap<Vec<u8>, Vec<u8>> {
@@ -49,7 +49,7 @@ impl StorageEngine for BTreeMemoryEngine {
     }
 
     fn get(&self, table_id: u32, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        Ok(self.table(table_id).get(key).cloned())
+        Ok(self.table(table_id).and_then(|t| t.get(key).cloned()))
     }
 
     fn put(&mut self, table_id: u32, key: &[u8], value: &[u8]) -> Result<()> {
@@ -64,7 +64,10 @@ impl StorageEngine for BTreeMemoryEngine {
 
     fn scan(&self, table_id: u32, start: &[u8], end: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         use std::collections::Bound;
-        let table = self.table(table_id);
+        let table = match self.table(table_id) {
+            Some(t) => t,
+            None => return Ok(Vec::new()),
+        };
 
         let start_bound = if start.is_empty() {
             Bound::Unbounded
@@ -199,3 +202,9 @@ mod tests {
         assert_eq!(keys, vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]);
     }
 }
+
+// Capability implementations for BTreeMemoryEngine
+impl crate::engine::CanOrderBy for BTreeMemoryEngine {}
+impl crate::engine::CanScan for BTreeMemoryEngine {}
+impl crate::engine::CanBatch for BTreeMemoryEngine {}
+impl crate::engine::CanFts for BTreeMemoryEngine {}

@@ -262,3 +262,10 @@ mod tests {
         assert_eq!(engine.get(1, b"b").unwrap(), None);
     }
 }
+
+// Capability implementations for BTreeEngine
+impl crate::engine::CanOrderBy for BTreeEngine {}
+impl crate::engine::CanScan for BTreeEngine {}
+impl crate::engine::CanBatch for BTreeEngine {}
+impl crate::engine::CanFts for BTreeEngine {}
+impl crate::engine::CanTransaction for BTreeEngine {}
