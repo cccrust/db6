@@ -87,7 +87,7 @@ impl FileStorage {
         })
     }
 
-    fn file_mut(&self) -> std::sync::MutexGuard<Option<File>> {
+    fn file_mut(&self) -> std::sync::MutexGuard<'_, Option<File>> {
         self.file.lock().unwrap()
     }
 

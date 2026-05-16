@@ -17,6 +17,6 @@ pub mod fts;
 
 pub use engine::{EngineStats, StorageEngine};
 pub use error::{Error, Result};
-pub use fts::{FtsIndex, FtsTokenizer, CjkTokenizer};
+pub use fts::{FtsIndex, FtsTokenizer, CjkTokenizer, EnglishTokenizer};
 pub use kv::{KvStore, Transactional, Persistent};
 pub use sql::{parse, Executor, ResultSet};
