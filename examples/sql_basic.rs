@@ -2,13 +2,13 @@
 //! 
 //! 展示如何使用 db6 的 SQL 解析與執行
 
-use db6::{Executor, engine::MemoryEngine};
+use db6::{Executor, engine::BTreeMemoryEngine};
 
 fn main() {
     println!("=== SQL Basic Example ===\n");
 
-    // 建立引擎與執行器
-    let engine = MemoryEngine::new();
+    // 建立 BTree 引擎（支援 ORDER BY/scan）
+    let engine = BTreeMemoryEngine::new();
     let mut executor = Executor::new(Box::new(engine));
 
     // INSERT

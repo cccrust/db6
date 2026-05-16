@@ -10,7 +10,7 @@ pub mod memory;
 pub mod btree;
 pub mod lsm;
 
-pub use memory::MemoryEngine;
+pub use memory::{HashMemoryEngine, BTreeMemoryEngine};
 pub use btree::BTreeEngine;
 pub use lsm::LsmEngine;
 

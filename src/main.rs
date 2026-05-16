@@ -1,12 +1,13 @@
 //! db6 REPL - Interactive SQL command line
 
 use db6::Executor;
-use db6::engine::{MemoryEngine, BTreeEngine, LsmEngine, StorageEngine};
+use db6::engine::{HashMemoryEngine, BTreeMemoryEngine, BTreeEngine, LsmEngine, StorageEngine};
 use std::io::{self, Write};
 
 fn create_engine(engine_type: &str) -> Option<Box<dyn StorageEngine>> {
     match engine_type {
-        "memory" => Some(Box::new(MemoryEngine::new())),
+        "memory" | "memory-hash" => Some(Box::new(HashMemoryEngine::new())),
+        "memory-btree" => Some(Box::new(BTreeMemoryEngine::new())),
         "btree" => Some(Box::new(BTreeEngine::new())),
         "lsm" => Some(Box::new(LsmEngine::new())),
         _ => None,
@@ -14,15 +15,11 @@ fn create_engine(engine_type: &str) -> Option<Box<dyn StorageEngine>> {
 }
 
 fn main() {
-    println!("db6 v2.4.0 - Interactive SQL REPL");
+    println!("db6 v2.5.0 - Interactive SQL REPL");
     println!("Type '.quit' to exit, '.help' for commands\n");
 
-    let mut engine_type = "memory".to_string();
-    let engine = MemoryEngine::new();
-    println!("Type '.quit' to exit, '.help' for commands\n");
-
-    let mut engine_type = "memory".to_string();
-    let engine = MemoryEngine::new();
+    let mut engine_type = "memory-btree".to_string();
+    let engine = BTreeMemoryEngine::new();
     let mut executor = Executor::new(Box::new(engine));
 
     loop {
@@ -46,7 +43,7 @@ fn main() {
                 executor = Executor::new(engine);
                 println!("Switched to {} engine", engine_type);
             } else {
-                println!("Unknown engine: {}. Use: memory, btree, lsm", new_type);
+                println!("Unknown engine: {}. Use: memory, memory-hash, memory-btree, btree, lsm", new_type);
             }
             continue;
         }
@@ -58,8 +55,14 @@ fn main() {
                 println!("  .quit, .exit  - Exit REPL");
                 println!("  .help         - Show this help");
                 println!("  .engine       - Show current engine");
-                println!("  .engine <type> - Switch engine (memory, btree, lsm)");
+                println!("  .engine <type> - Switch engine (memory-hash, memory-btree, btree, lsm)");
                 println!("  .read <file>  - Execute SQL from file");
+                println!("");
+                println!("Engine types:");
+                println!("  memory-hash   - Redis-like, fast KV (no ORDER BY/scan)");
+                println!("  memory-btree  - SQLite-like, supports SQL (ORDER BY/scan)");
+                println!("  btree         - BTree on disk, transactions");
+                println!("  lsm           - LSM tree, high write throughput");
                 println!("");
                 println!("SQL Examples:");
                 println!("  SELECT * FROM users");

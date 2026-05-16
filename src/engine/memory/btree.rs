@@ -1,18 +1,18 @@
-//! Memory engine — BTreeMap based, in-memory only.
+//! BTree Memory Engine - SQLite-like, supports SQL operations
+//! 
+//! Uses BTreeMap for ordered data, supports ORDER BY and range scans.
 
 use std::collections::BTreeMap;
 use crate::engine::{EngineStats, StorageEngine};
 use crate::error::Result;
 
-/// BTreeMap-based in-memory engine.
-/// 所有操作在記憶體中，適合快速實驗和高效能快取。
-pub struct MemoryEngine {
+pub struct BTreeMemoryEngine {
     tables: std::collections::HashMap<u32, BTreeMap<Vec<u8>, Vec<u8>>>,
 }
 
-impl MemoryEngine {
+impl BTreeMemoryEngine {
     pub fn new() -> Self {
-        MemoryEngine {
+        BTreeMemoryEngine {
             tables: std::collections::HashMap::new(),
         }
     }
@@ -29,13 +29,13 @@ impl MemoryEngine {
     }
 }
 
-impl Default for MemoryEngine {
+impl Default for BTreeMemoryEngine {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl StorageEngine for MemoryEngine {
+impl StorageEngine for BTreeMemoryEngine {
     fn open(_path: &std::path::Path) -> Result<Box<dyn StorageEngine>> {
         Ok(Box::new(Self::new()))
     }
@@ -45,7 +45,7 @@ impl StorageEngine for MemoryEngine {
     }
 
     fn engine_type(&self) -> &'static str {
-        "memory"
+        "memory-btree"
     }
 
     fn get(&self, table_id: u32, key: &[u8]) -> Result<Option<Vec<u8>>> {
@@ -58,7 +58,6 @@ impl StorageEngine for MemoryEngine {
     }
 
     fn delete(&mut self, table_id: u32, key: &[u8]) -> Result<()> {
-        // Memory engine 不需要 tombstone，直接刪除
         self.table_mut(table_id).remove(key);
         Ok(())
     }
@@ -113,12 +112,10 @@ impl StorageEngine for MemoryEngine {
     }
 
     fn flush(&mut self) -> Result<()> {
-        // 純記憶體，nothing to flush
         Ok(())
     }
 
     fn sync(&mut self) -> Result<()> {
-        // 純記憶體，nothing to sync
         Ok(())
     }
 
@@ -145,7 +142,7 @@ impl StorageEngine for MemoryEngine {
             size_bytes: 0,
             cache_hit_rate: None,
             in_transaction: false,
-            engine: "memory",
+            engine: "memory-btree",
         }
     }
 }
@@ -155,16 +152,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_memory_basic() {
-        let mut engine = MemoryEngine::new();
+    fn test_btree_basic() {
+        let mut engine = BTreeMemoryEngine::new();
         engine.put(1, b"hello", b"world").unwrap();
         assert_eq!(engine.get(1, b"hello").unwrap(), Some(b"world".to_vec()));
         assert_eq!(engine.get(1, b"missing").unwrap(), None);
     }
 
     #[test]
-    fn test_memory_scan() {
-        let mut engine = MemoryEngine::new();
+    fn test_btree_scan() {
+        let mut engine = BTreeMemoryEngine::new();
         engine.put(1, b"a", b"1").unwrap();
         engine.put(1, b"b", b"2").unwrap();
         engine.put(1, b"c", b"3").unwrap();
@@ -174,16 +171,16 @@ mod tests {
     }
 
     #[test]
-    fn test_memory_delete() {
-        let mut engine = MemoryEngine::new();
+    fn test_btree_delete() {
+        let mut engine = BTreeMemoryEngine::new();
         engine.put(1, b"k", b"v").unwrap();
         engine.delete(1, b"k").unwrap();
         assert_eq!(engine.get(1, b"k").unwrap(), None);
     }
 
     #[test]
-    fn test_memory_multi_table() {
-        let mut engine = MemoryEngine::new();
+    fn test_btree_multi_table() {
+        let mut engine = BTreeMemoryEngine::new();
         engine.put(1, b"key", b"table1").unwrap();
         engine.put(2, b"key", b"table2").unwrap();
         assert_eq!(engine.get(1, b"key").unwrap(), Some(b"table1".to_vec()));
@@ -191,9 +188,14 @@ mod tests {
     }
 
     #[test]
-    fn test_memory_transaction_unsupported() {
-        let mut engine = MemoryEngine::new();
-        let r = engine.begin_transaction();
-        assert!(r.is_err());
+    fn test_btree_order() {
+        let mut engine = BTreeMemoryEngine::new();
+        engine.put(1, b"c", b"3").unwrap();
+        engine.put(1, b"a", b"1").unwrap();
+        engine.put(1, b"b", b"2").unwrap();
+        
+        let results = engine.scan(1, b"", b"").unwrap();
+        let keys: Vec<_> = results.iter().map(|(k, _)| k.clone()).collect();
+        assert_eq!(keys, vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]);
     }
 }

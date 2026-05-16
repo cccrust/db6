@@ -2,13 +2,13 @@
 //! 
 //! 展示如何使用 db6 的全文檢索功能
 
-use db6::{FtsIndex, engine::MemoryEngine};
+use db6::{FtsIndex, engine::HashMemoryEngine};
 
 fn main() {
     println!("=== FTS Basic Example ===\n");
 
     // 建立引擎
-    let engine = MemoryEngine::new();
+    let engine = HashMemoryEngine::new();
 
     // 建立 FTS 索引
     let mut fts = FtsIndex::new(engine);

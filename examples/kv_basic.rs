@@ -2,13 +2,13 @@
 //! 
 //! 展示如何使用 db6 的 KV API
 
-use db6::engine::{StorageEngine, MemoryEngine};
+use db6::engine::{StorageEngine, HashMemoryEngine};
 
 fn main() {
-    println!("=== KV Basic Example ===\n");
+    println!("=== KV Basic Example (Hash) ===\n");
 
-    // 建立記憶體引擎
-    let mut engine = MemoryEngine::new();
+    // 建立 Hash 記憶體引擎 (O(1) 操作)
+    let mut engine = HashMemoryEngine::new();
 
     // 基本寫入讀取
     engine.put(1, b"key1", b"value1").unwrap();

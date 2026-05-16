@@ -21,6 +21,8 @@
     * 請在 examples/ 下寫出直接使用的範例，並寫出 test_examples.sh 測試結果的正確性
 * 目前 memory.rs 使用 btree 方式，效能會比較差嗎？如果改成類似 redis 會更快嗎？
     * 是否需要將 memory 分成兩版，一版像是 sqlite memory 支援 sql，另一版像是 redis 支援 kv
+* 要讓 kv, sql 前端都可以任意挑選後端 (btree/lsm/memory btree / memory hash) 
+    * 但是有些功能 sql 不支援，使用時會提出錯誤（最好在編譯時期就能提出錯誤）
 * 目前 fts (fulltext) 還有什麼沒做的呢？
 
     

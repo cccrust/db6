@@ -52,3 +52,5 @@ pub use sql::{parse, Executor, ResultSet};
 - [_doc/v2.1.md](_doc/v2.1.md) — v2.1 完成項目
 - [_doc/v2.2.md](_doc/v2.2.md) — v2.2 完成項目
 - [_doc/v2.3.md](_doc/v2.3.md) — v2.3 完成項目（範例 + API 統一化）
+- [_doc/v2.4.md](_doc/v2.4.md) — v2.4 完成項目（LSM 強化）
+- [_doc/v2.5.md](_doc/v2.5.md) — v2.5 完成項目（Memory 模組化）

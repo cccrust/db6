@@ -2,7 +2,7 @@
 //! 
 //! 展示如何在不同引擎間切換
 
-use db6::engine::{StorageEngine, MemoryEngine, BTreeEngine, LsmEngine};
+use db6::engine::{StorageEngine, HashMemoryEngine, BTreeMemoryEngine, BTreeEngine, LsmEngine};
 
 fn test_engine(name: &str, mut engine: Box<dyn StorageEngine>) {
     println!("\n--- Testing {} ---", name);
@@ -20,28 +20,17 @@ fn test_engine(name: &str, mut engine: Box<dyn StorageEngine>) {
 fn main() {
     println!("=== Multi Engine Example ===\n");
 
-    // 使用 Memory Engine
-    test_engine("Memory", MemoryEngine::open_memory());
+    // 使用 HashMemoryEngine
+    test_engine("HashMemoryEngine", Box::new(HashMemoryEngine::new()));
 
-    // 使用 BTree Engine
-    test_engine("BTree", BTreeEngine::open_memory());
+    // 使用 BTreeMemoryEngine
+    test_engine("BTreeMemoryEngine", Box::new(BTreeMemoryEngine::new()));
 
-    // 使用 LSM Engine
-    test_engine("LSM", LsmEngine::open_memory());
+    // 使用 BTreeEngine
+    test_engine("BTreeEngine", Box::new(BTreeEngine::new()));
 
-    // 動態建立引擎
-    println!("\n--- Dynamic Engine Creation ---");
-    let engine_types = vec!["memory", "btree", "lsm"];
-    
-    for etype in engine_types {
-        let engine: Box<dyn StorageEngine> = match etype {
-            "memory" => MemoryEngine::open_memory(),
-            "btree" => BTreeEngine::open_memory(),
-            "lsm" => LsmEngine::open_memory(),
-            _ => continue,
-        };
-        println!("Created {}: {}", etype, engine.engine_type());
-    }
+    // 使用 LSMEngine
+    test_engine("LsmEngine", Box::new(LsmEngine::new()));
 
     println!("\n=== Done ===");
 }

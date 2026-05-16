@@ -166,7 +166,7 @@ impl Executor {
 
 impl Default for Executor {
     fn default() -> Self {
-        Self::new(Box::new(crate::engine::MemoryEngine::new()))
+        Self::new(Box::new(crate::engine::BTreeMemoryEngine::new()))
     }
 }
 
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     #[ignore = "SQL stub not implemented - see plan.md v2.0"]
     fn test_executor_select() {
-        let mut engine = crate::engine::MemoryEngine::new();
+        let mut engine = crate::engine::BTreeMemoryEngine::new();
         engine.put(1, b"key1", b"value1").unwrap();
         engine.put(1, b"key2", b"value2").unwrap();
         
@@ -190,7 +190,7 @@ mod tests {
     #[test]
     #[ignore = "SQL stub not implemented - see plan.md v2.0"]
     fn test_executor_insert() {
-        let engine = crate::engine::MemoryEngine::new();
+        let engine = crate::engine::BTreeMemoryEngine::new();
         let mut exec = Executor::new(Box::new(engine));
         
         let result = exec.execute("INSERT INTO test VALUES ('hello')").unwrap();
