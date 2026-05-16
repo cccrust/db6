@@ -445,4 +445,21 @@ mod tests {
         let (doc_id, score) = results[0];
         assert!(score >= 0.0);
     }
+
+    #[test]
+    fn test_fts_with_kv_engine() {
+        use crate::kv::KvEngine;
+        
+        let engine = KvEngine::new("memory").unwrap();
+        let mut index = super::FtsIndex::new(engine);
+        
+        index.insert(1, "Hello World").unwrap();
+        index.insert(2, "資料庫系統").unwrap();
+        
+        let results = index.search("Hello").unwrap();
+        assert!(results.contains(&1));
+        
+        let results2 = index.search("資料庫").unwrap();
+        assert!(results2.contains(&2));
+    }
 }
