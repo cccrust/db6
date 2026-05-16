@@ -1,0 +1,13 @@
+[package]
+name = "db6"
+version = "0.1.0"
+edition = "2021"
+description = "Unified database with pluggable storage engines (Memory/BTree/LSM) + SQL + FTS5"
+
+[dependencies]
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+zstd = "0.13"
+
+[dev-dependencies]
+tempfile = "3.14"
