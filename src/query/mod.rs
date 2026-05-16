@@ -104,6 +104,18 @@ impl Db {
         TransactionQuery { db: self }
     }
 
+    /// MapReduce fluent interface
+    pub fn map_reduce(&mut self, table_name: &str) -> MapReduceQuery<'_> {
+        let table_id = self.get_table_id(table_name);
+        MapReduceQuery {
+            db: self,
+            table_name: table_name.to_string(),
+            table_id,
+            data: Vec::new(),
+            reducer: None,
+        }
+    }
+
     pub fn engine_type(&self) -> &'static str {
         self.engine.engine_type()
     }
@@ -166,6 +178,26 @@ impl<'a> TableQuery<'a> {
 
     pub fn table_name(&self) -> &str {
         &self.table_name
+    }
+
+    /// Map transformation: apply function to each key-value pair
+    /// Returns a MapReduceQuery with the transformed data
+    pub fn map<F>(mut self, f: F) -> Result<MapReduceQuery<'a>>
+    where
+        F: Fn(&[u8], &[u8]) -> (Vec<u8>, Vec<u8>) + Send + Sync + 'static,
+    {
+        let rows = self.db.engine.scan(self.table_id, b"", b"")?;
+        let mapped: Vec<(Vec<u8>, Vec<u8>)> = rows.iter()
+            .map(|(k, v)| f(k, v))
+            .collect();
+
+        Ok(MapReduceQuery {
+            db: self.db,
+            table_name: self.table_name,
+            table_id: self.table_id,
+            data: mapped,
+            reducer: None,
+        })
     }
 }
 
@@ -285,6 +317,53 @@ impl<'a> UpdateQuery<'a> {
         }
 
         Ok(count)
+    }
+}
+
+/// MapReduce fluent interface
+/// 設計：table("users").map(...).reduce(...).execute()
+pub struct MapReduceQuery<'a> {
+    db: &'a mut Db,
+    table_name: String,
+    table_id: u32,
+    data: Vec<(Vec<u8>, Vec<u8>)>,
+    reducer: Option<Box<dyn FnMut(Vec<u8>, &[u8], &[u8]) -> Vec<u8> + Send + Sync>>,
+}
+
+impl<'a> MapReduceQuery<'a> {
+    /// Set the reducer function: (accumulator, key, value) -> new_accumulator
+    /// The reducer is called for each key-value pair and updates the accumulator
+    pub fn reduce<F>(mut self, f: F) -> Self
+    where
+        F: FnMut(Vec<u8>, &[u8], &[u8]) -> Vec<u8> + Send + Sync + 'static,
+    {
+        self.reducer = Some(Box::new(f));
+        self
+    }
+
+    /// Execute the reduce phase and return results
+    /// If no reducer is set, returns the mapped data as-is
+    pub fn execute(mut self) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        if let Some(mut reducer) = self.reducer {
+            let mut acc: Vec<u8> = Vec::new();
+            for (k, v) in &self.data {
+                acc = reducer(acc, k, v);
+            }
+            if !acc.is_empty() {
+                return Ok(vec![(b"result".to_vec(), acc)]);
+            }
+        }
+
+        Ok(self.data)
+    }
+
+    /// Execute and return the accumulator value as a string
+    pub fn execute_scalar(self) -> Result<String> {
+        let result = self.execute()?;
+        if result.is_empty() {
+            return Ok(String::new());
+        }
+        Ok(String::from_utf8_lossy(&result[0].1).to_string())
     }
 }
 
@@ -887,5 +966,135 @@ mod tests {
         assert_eq!(page3.rows[0][0], "007");
         assert_eq!(page3.rows[1][0], "008");
         assert_eq!(page3.rows[2][0], "009");
+    }
+
+    #[test]
+    fn test_map_reduce_basic() {
+        let mut db = Db::new("memory").unwrap();
+        db.table("users").put(b"1", b"Alice").unwrap();
+        db.table("users").put(b"2", b"Bob").unwrap();
+        db.table("users").put(b"3", b"Charlie").unwrap();
+
+        // Map: transform all values to uppercase
+        let result = db.table("users")
+            .map(|k, v| (k.to_vec(), String::from_utf8_lossy(v).to_uppercase().into_bytes()))
+            .unwrap()
+            .reduce(|acc, k, v| {
+                let mut r = acc;
+                if !r.is_empty() { r.push(b','); }
+                r.extend_from_slice(v);
+                r
+            })
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        let values = String::from_utf8_lossy(&result[0].1);
+        assert!(values.contains("ALICE"));
+        assert!(values.contains("BOB"));
+        assert!(values.contains("CHARLIE"));
+    }
+
+    #[test]
+    fn test_map_reduce_count() {
+        let mut db = Db::new("memory").unwrap();
+        for i in 1..=5 {
+            db.table("users").put(format!("{}", i).as_bytes(), format!("User{}", i).as_bytes()).unwrap();
+        }
+
+        // Count the number of entries
+        let result = db.table("users")
+            .map(|k, v| (k.to_vec(), v.to_vec()))
+            .unwrap()
+            .reduce(|acc, _, _| {
+                let count = if acc.is_empty() {
+                    0
+                } else {
+                    String::from_utf8_lossy(&acc).parse::<usize>().unwrap_or(0)
+                };
+                (count + 1).to_string().into_bytes()
+            })
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        let count = String::from_utf8_lossy(&result[0].1).parse::<usize>().unwrap();
+        assert_eq!(count, 5);
+    }
+
+    #[test]
+    fn test_map_reduce_sum() {
+        let mut db = Db::new("memory").unwrap();
+        db.table("numbers").put(b"a", b"10").unwrap();
+        db.table("numbers").put(b"b", b"20").unwrap();
+        db.table("numbers").put(b"c", b"30").unwrap();
+
+        // Sum all values
+        let result = db.table("numbers")
+            .map(|k, v| (k.to_vec(), v.to_vec()))
+            .unwrap()
+            .reduce(|acc, _, v| {
+                let sum: i32 = if acc.is_empty() {
+                    0
+                } else {
+                    String::from_utf8_lossy(&acc).parse().unwrap_or(0)
+                };
+                let val: i32 = String::from_utf8_lossy(v).parse().unwrap_or(0);
+                (sum + val).to_string().into_bytes()
+            })
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        let sum = String::from_utf8_lossy(&result[0].1).parse::<i32>().unwrap();
+        assert_eq!(sum, 60);
+    }
+
+    #[test]
+    fn test_map_reduce_filter() {
+        let mut db = Db::new("memory").unwrap();
+        db.table("users").put(b"1", b"Alice").unwrap();
+        db.table("users").put(b"2", b"Bob").unwrap();
+        db.table("users").put(b"3", b"Charlie").unwrap();
+
+        // Filter: keep only names starting with 'A'
+        let result = db.table("users")
+            .map(|k, v| {
+                let name = String::from_utf8_lossy(v);
+                if name.starts_with('A') {
+                    (k.to_vec(), v.to_vec())
+                } else {
+                    (b"".to_vec(), b"".to_vec())
+                }
+            })
+            .unwrap()
+            .reduce(|acc, k, v| {
+                if k.is_empty() { return acc; }
+                let mut r = acc;
+                if !r.is_empty() { r.push(b','); }
+                r.extend_from_slice(v);
+                r
+            })
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(String::from_utf8_lossy(&result[0].1), "Alice");
+    }
+
+    #[test]
+    fn test_map_reduce_identity() {
+        let mut db = Db::new("memory").unwrap();
+        db.table("users").put(b"1", b"Alice").unwrap();
+        db.table("users").put(b"2", b"Bob").unwrap();
+
+        // Just map with identity function, no reduce
+        let result = db.table("users")
+            .map(|k, v| (k.to_vec(), v.to_vec()))
+            .unwrap()
+            .execute()
+            .unwrap();
+
+        assert_eq!(result.len(), 2);
     }
 }
