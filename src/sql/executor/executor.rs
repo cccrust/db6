@@ -50,7 +50,7 @@ impl Executor {
         }
     }
 
-    fn execute_scan(&self, s: &crate::sql::planner::ScanPlan) -> Result<ResultSet> {
+    fn execute_scan(&self, s: &crate::sql::planner::plan::ScanPlan) -> Result<ResultSet> {
         if s.is_fts {
             return Err(Error::Fts("FTS scan not yet implemented — see fts/ module".into()));
         }
@@ -64,7 +64,7 @@ impl Executor {
         })
     }
 
-    fn execute_create_fts(&mut self, f: &crate::sql::planner::FtsPlan) -> Result<ResultSet> {
+    fn execute_create_fts(&mut self, f: &crate::sql::planner::plan::FtsPlan) -> Result<ResultSet> {
         Ok(ResultSet {
             columns: vec![],
             rows: vec![],
@@ -75,7 +75,7 @@ impl Executor {
 
 impl Default for Executor {
     fn default() -> Self {
-        Self::new(Box::new(crate::engine::MemoryEngine::open_memory()))
+        Self::new(crate::engine::MemoryEngine::open_memory())
     }
 }
 

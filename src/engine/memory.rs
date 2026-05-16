@@ -64,11 +64,21 @@ impl StorageEngine for MemoryEngine {
     }
 
     fn scan(&self, table_id: u32, start: &[u8], end: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        use std::collections::Bound;
         let table = self.table(table_id);
-        let start = if start.is_empty() { None } else { Some(start.to_vec()) };
-        let end = if end.is_empty() { None } else { Some(end.to_vec()) };
 
-        let iter = table.range(start..end);
+        let start_bound = if start.is_empty() {
+            Bound::Unbounded
+        } else {
+            Bound::Included(start.to_vec())
+        };
+        let end_bound = if end.is_empty() {
+            Bound::Unbounded
+        } else {
+            Bound::Excluded(end.to_vec())
+        };
+
+        let iter = table.range((start_bound, end_bound));
         Ok(iter.map(|(k, v)| (k.clone(), v.clone())).collect())
     }
 

@@ -5,4 +5,4 @@ pub mod planner;
 pub mod constraints;
 
 pub use planner::Planner;
-pub use plan::Plan;
+pub use plan::{Plan, ScanPlan, FtsPlan};

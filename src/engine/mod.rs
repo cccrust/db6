@@ -29,44 +29,17 @@ pub struct EngineStats {
 /// 底層儲存引擎介面，支援多 table 隔離。
 /// table_id 用於區分不同 table 的資料。
 pub trait StorageEngine: Send + Sync {
-    fn open(path: &std::path::Path) -> Result<Box<dyn StorageEngine>>;
-    fn open_memory() -> Box<dyn StorageEngine>;
-    fn engine_type(&self) -> &'static str;
-
-    fn get(&self, table_id: u32, key: &[u8]) -> Result<Option<Vec<u8>>>;
-    fn put(&mut self, table_id: u32, key: &[u8], value: &[u8]) -> Result<()>;
-    fn delete(&mut self, table_id: u32, key: &[u8]) -> Result<()>;
-    fn scan(&self, table_id: u32, start: &[u8], end: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>>;
-
-    fn flush(&mut self) -> Result<()>;
-    fn sync(&mut self) -> Result<()>;
-    fn begin_transaction(&mut self) -> Result<()>;
-    fn commit_transaction(&mut self) -> Result<()>;
-    fn rollback_transaction(&mut self) -> Result<()>;
-    fn has_transaction(&self) -> bool;
-    fn stats(&self) -> EngineStats;
-}
-
-/// SQL 層直接呼叫的 KV 介面。
-/// 所有 engine（Memory/BTree/LSM）都實作 `impl KvStore for XxxEngine`。
-pub trait KvStore: Send + Sync {
-    fn engine_type(&self) -> &'static str { "unknown" }
-    fn put(&mut self, table_id: u32, key: &[u8], value: &[u8]) -> Result<()>;
-    fn get(&mut self, table_id: u32, key: &[u8]) -> Result<Option<Vec<u8>>>;
-    fn delete(&mut self, table_id: u32, key: &[u8]) -> Result<()>;
-    fn scan(&self, table_id: u32, start: &[u8], end: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>>;
-}
-
-/// 所有儲存引擎必須實作的 trait。
-/// SQL 層透過此 trait 與底層引擎溝通。
-pub trait StorageEngine: Send + Sync {
     // ── 工廠 ────────────────────────────────────────────────────────────────
 
     /// 開啟或建立磁碟資料庫
-    fn open(path: &std::path::Path) -> Result<Box<dyn StorageEngine>>;
+    fn open(path: &std::path::Path) -> Result<Box<dyn StorageEngine>>
+    where
+        Self: Sized;
 
     /// 建立記憶體模式資料庫
-    fn open_memory() -> Box<dyn StorageEngine>;
+    fn open_memory() -> Box<dyn StorageEngine>
+    where
+        Self: Sized;
 
     /// 引擎類型名稱
     fn engine_type(&self) -> &'static str;
@@ -111,4 +84,14 @@ pub trait StorageEngine: Send + Sync {
 
     /// 取得統計資訊
     fn stats(&self) -> EngineStats;
+}
+
+/// SQL 層直接呼叫的 KV 介面。
+/// 所有 engine（Memory/BTree/LSM）都實作 `impl KvStore for XxxEngine`。
+pub trait KvStore: Send + Sync {
+    fn engine_type(&self) -> &'static str { "unknown" }
+    fn put(&mut self, table_id: u32, key: &[u8], value: &[u8]) -> Result<()>;
+    fn get(&mut self, table_id: u32, key: &[u8]) -> Result<Option<Vec<u8>>>;
+    fn delete(&mut self, table_id: u32, key: &[u8]) -> Result<()>;
+    fn scan(&self, table_id: u32, start: &[u8], end: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>>;
 }

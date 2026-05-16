@@ -9,7 +9,7 @@ pub enum Token<'a> {
     Fts5, Match,
     OpenParen, CloseParen, Comma, Semicolon, Star, Dot,
     Eq, Ne, Lt, Le, Gt, Ge, Plus, Minus, Slash, Percent,
-    String(&'a str), Number(&'a str), Ident(&'a str), Param(&'a str),
+    String(&'a [u8]), Number(&'a [u8]), Ident(&'a [u8]), Param(&'a [u8]),
     Asc, Desc, Order, By, Group, Having, Limit, Offset,
     Join, Left, Right, Inner, Outer, On, As,
     Distinct, All, Between, In, Is, Null, True, False,
@@ -17,13 +17,13 @@ pub enum Token<'a> {
 }
 
 pub struct Lexer<'a> {
-    input: &'a str,
+    input: &'a [u8],
     pos: usize,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
-        Lexer { input, pos: 0 }
+        Lexer { input: input.as_bytes(), pos: 0 }
     }
 
     pub fn next_token(&mut self) -> Token<'a> {
@@ -31,7 +31,7 @@ impl<'a> Lexer<'a> {
         if self.pos >= self.input.len() {
             return Token::Eof;
         }
-        let c = self.input[self.pos..].chars().next().unwrap();
+        let c = self.input[self.pos] as char;
         match c {
             '(' => { self.pos += 1; Token::OpenParen }
             ')' => { self.pos += 1; Token::CloseParen }
@@ -46,7 +46,7 @@ impl<'a> Lexer<'a> {
             '-' => { self.pos += 1; Token::Minus }
             '/' => { self.pos += 1; Token::Slash }
             '%' => { self.pos += 1; Token::Percent }
-            '"' | '\'' => self.read_string(c),
+            '"' | '\'' => self.read_string(c as u8),
             '`' => self.read_ident(),
             _ if c.is_ascii_digit() => self.read_number(),
             _ if c.is_alphabetic() || c == '_' => self.read_ident(),
@@ -56,19 +56,19 @@ impl<'a> Lexer<'a> {
 
     fn skip_whitespace(&mut self) {
         while self.pos < self.input.len()
-            && self.input[self.pos..].chars().next().map(|c| c.is_whitespace()).unwrap_or(false)
+            && (self.input[self.pos] as char).is_whitespace()
         {
             self.pos += 1;
         }
     }
 
-    fn read_string(&mut self, quote: char) -> Token<'a> {
+    fn read_string(&mut self, quote: u8) -> Token<'a> {
         let start = self.pos + 1;
         self.pos += 1;
         while self.pos < self.input.len()
-            && self.input[self.pos..].chars().next().unwrap() != quote
+            && self.input[self.pos] != quote
         {
-            if self.input[self.pos] == '\\' && self.pos + 1 < self.input.len() {
+            if self.input[self.pos] == b'\\' && self.pos + 1 < self.input.len() {
                 self.pos += 2;
             } else {
                 self.pos += 1;
@@ -96,56 +96,56 @@ impl<'a> Lexer<'a> {
     fn read_ident(&mut self) -> Token<'a> {
         let start = self.pos;
         while self.pos < self.input.len()
-            && (self.input[self.pos].is_alphanumeric() || self.input[self.pos] == b'_')
+            && (self.input[self.pos].is_ascii_alphanumeric() || self.input[self.pos] == b'_')
         {
             self.pos += 1;
         }
         let kw = &self.input[start..self.pos];
-        match kw.to_uppercase().as_str() {
-            "SELECT" => Token::Select,
-            "FROM" => Token::From,
-            "WHERE" => Token::Where,
-            "AND" => Token::And,
-            "OR" => Token::Or,
-            "NOT" => Token::Not,
-            "INSERT" => Token::Insert,
-            "INTO" => Token::Into,
-            "VALUES" => Token::Values,
-            "UPDATE" => Token::Update,
-            "SET" => Token::Set,
-            "DELETE" => Token::Delete,
-            "CREATE" => Token::Create,
-            "TABLE" => Token::Table,
-            "VIRTUAL" => Token::Virtual,
-            "USING" => Token::Using,
-            "DROP" => Token::Drop,
-            "ALTER" => Token::Alter,
-            "ADD" => Token::Add,
-            "COLUMN" => Token::Column,
-            "FTS5" => Token::Fts5,
-            "MATCH" => Token::Match,
-            "ASC" => Token::Asc,
-            "DESC" => Token::Desc,
-            "ORDER" => Token::Order,
-            "BY" => Token::By,
-            "GROUP" => Token::Group,
-            "HAVING" => Token::Having,
-            "LIMIT" => Token::Limit,
-            "JOIN" => Token::Join,
-            "LEFT" => Token::Left,
-            "RIGHT" => Token::Right,
-            "INNER" => Token::Inner,
-            "OUTER" => Token::Outer,
-            "ON" => Token::On,
-            "AS" => Token::As,
-            "DISTINCT" => Token::Distinct,
-            "ALL" => Token::All,
-            "BETWEEN" => Token::Between,
-            "IN" => Token::In,
-            "IS" => Token::Is,
-            "NULL" => Token::Null,
-            "TRUE" => Token::True,
-            "FALSE" => Token::False,
+        match std::str::from_utf8(kw).map(|s| s.to_uppercase()).as_deref() {
+            Ok("SELECT") => Token::Select,
+            Ok("FROM") => Token::From,
+            Ok("WHERE") => Token::Where,
+            Ok("AND") => Token::And,
+            Ok("OR") => Token::Or,
+            Ok("NOT") => Token::Not,
+            Ok("INSERT") => Token::Insert,
+            Ok("INTO") => Token::Into,
+            Ok("VALUES") => Token::Values,
+            Ok("UPDATE") => Token::Update,
+            Ok("SET") => Token::Set,
+            Ok("DELETE") => Token::Delete,
+            Ok("CREATE") => Token::Create,
+            Ok("TABLE") => Token::Table,
+            Ok("VIRTUAL") => Token::Virtual,
+            Ok("USING") => Token::Using,
+            Ok("DROP") => Token::Drop,
+            Ok("ALTER") => Token::Alter,
+            Ok("ADD") => Token::Add,
+            Ok("COLUMN") => Token::Column,
+            Ok("FTS5") => Token::Fts5,
+            Ok("MATCH") => Token::Match,
+            Ok("ASC") => Token::Asc,
+            Ok("DESC") => Token::Desc,
+            Ok("ORDER") => Token::Order,
+            Ok("BY") => Token::By,
+            Ok("GROUP") => Token::Group,
+            Ok("HAVING") => Token::Having,
+            Ok("LIMIT") => Token::Limit,
+            Ok("JOIN") => Token::Join,
+            Ok("LEFT") => Token::Left,
+            Ok("RIGHT") => Token::Right,
+            Ok("INNER") => Token::Inner,
+            Ok("OUTER") => Token::Outer,
+            Ok("ON") => Token::On,
+            Ok("AS") => Token::As,
+            Ok("DISTINCT") => Token::Distinct,
+            Ok("ALL") => Token::All,
+            Ok("BETWEEN") => Token::Between,
+            Ok("IN") => Token::In,
+            Ok("IS") => Token::Is,
+            Ok("NULL") => Token::Null,
+            Ok("TRUE") => Token::True,
+            Ok("FALSE") => Token::False,
             _ => Token::Ident(kw),
         }
     }

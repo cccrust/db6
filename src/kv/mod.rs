@@ -2,4 +2,4 @@
 
 pub mod kv;
 
-pub use self::kv::KvStore;
+pub use self::kv::{KvStore, Transactional, Persistent};

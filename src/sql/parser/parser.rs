@@ -38,7 +38,7 @@ fn parse_select(lexer: &mut Lexer) -> io::Result<SelectStmt> {
     let from = if lexer.next_token() == Token::From {
         let t = lexer.next_token();
         if let Token::Ident(s) = t {
-            Some(s.to_string())
+            Some(String::from_utf8_lossy(s).to_string())
         } else {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "expected table name"));
         }
@@ -61,7 +61,7 @@ fn parse_columns(lexer: &mut Lexer) -> io::Result<Vec<Expr>> {
         let tok = lexer.next_token();
         match tok {
             Token::Star => cols.push(Expr::Wildcard),
-            Token::Ident(s) => cols.push(Expr::Column(s.to_string())),
+            Token::Ident(s) => cols.push(Expr::Column(String::from_utf8_lossy(s).to_string())),
             Token::Eof | Token::From | Token::Where | Token::Order | Token::Group
                 | Token::Limit | Token::Semicolon => {
                 break;
@@ -104,7 +104,7 @@ fn parse_create_table(_lexer: &mut Lexer) -> io::Result<CreateTableStmt> {
 fn parse_create_virtual_table(lexer: &mut Lexer) -> io::Result<CreateVirtualTableStmt> {
     // CREATE VIRTUAL TABLE <name> USING fts5(<cols>, tokenize='cjk')
     let name = match lexer.next_token() {
-        Token::Ident(s) => s.to_string(),
+        Token::Ident(s) => String::from_utf8_lossy(s).to_string(),
         _ => return Err(io::Error::new(io::ErrorKind::InvalidInput, "expected table name")),
     };
 

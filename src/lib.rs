@@ -1,26 +1,11 @@
-//! db6 — Unified database with pluggable storage engines and SQL + FTS5 support
+//! db6 — Unified database with pluggable storage engines (Memory/BTree/LSM) + KV + FTS5
 //!
 //! # Architecture
 //!
-//! ```
-//! User API
-//!     ├── KV API    (KvStore trait)     ← SQL 層依賴這個
-//!     └── SQL API   (parser → planner → executor)
-//!                         │
-//!                         └── calls KvStore
-//!                               │
-//!                               └── impl for each engine
-//!                                     ├── Memory engine
-//!                                     ├── BTree engine
-//!                                     └── LSM engine
-//!                                           └── FTS5 (基於 KV 介面)
-//! ```
-//!
-//! # Key Traits
-//!
-//! - [`KvStore`] — unified KV interface (SQL 層直接依賴這個)
-//! - [`StorageEngine`] — low-level storage (engine 內部實作)
-//! - All engines implement both traits
+//! - KV API: unified key-value interface (storage engines implement this)
+//! - SQL API: parser -> planner -> executor (depends on KV)
+//! - Storage Engines: Memory, BTree, LSM (implement StorageEngine trait)
+//! - FTS5: full-text search on top of KV interface
 
 #![allow(dead_code, unused)]
 
