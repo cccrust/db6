@@ -13,6 +13,7 @@ pub struct BTreeEngine {
     tree: RwLock<BTree>,
     in_transaction: RwLock<bool>,
     tx_buffer: RwLock<BTreeMap<u32, BTreeMap<Vec<u8>, Option<Vec<u8>>>>>,
+    path: std::path::PathBuf,
 }
 
 impl BTreeEngine {
@@ -21,11 +22,25 @@ impl BTreeEngine {
             tree: RwLock::new(BTree::new()),
             in_transaction: RwLock::new(false),
             tx_buffer: RwLock::new(BTreeMap::new()),
+            path: std::path::PathBuf::new(),
         }
     }
 
-    pub fn open(_path: &Path) -> Result<Self> {
-        Ok(Self::new())
+    pub fn open(path: &Path) -> Result<Self> {
+        std::fs::create_dir_all(path)?;
+        
+        let tree = BTree::load(path)?;
+        
+        let mut engine = BTreeEngine {
+            tree: RwLock::new(tree),
+            in_transaction: RwLock::new(false),
+            tx_buffer: RwLock::new(BTreeMap::new()),
+            path: path.to_path_buf(),
+        };
+        
+        engine.tree.write().unwrap().set_path(path.to_path_buf());
+        
+        Ok(engine)
     }
 }
 
@@ -260,6 +275,32 @@ mod tests {
         engine.rollback_transaction().unwrap();
         
         assert_eq!(engine.get(1, b"b").unwrap(), None);
+    }
+
+    #[test]
+    fn test_btree_persistence() {
+        use std::path::PathBuf;
+        
+        let temp_dir = std::env::temp_dir().join("db6_btree_persist_test");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        
+        // Write data
+        {
+            let mut engine = BTreeEngine::open(Path::new(&temp_dir)).unwrap();
+            engine.put(1, b"key1", b"value1").unwrap();
+            engine.put(1, b"key2", b"value2").unwrap();
+            engine.flush().unwrap();
+        }
+        
+        // Reopen and verify
+        {
+            let engine = BTreeEngine::open(Path::new(&temp_dir)).unwrap();
+            assert_eq!(engine.get(1, b"key1").unwrap(), Some(b"value1".to_vec()));
+            assert_eq!(engine.get(1, b"key2").unwrap(), Some(b"value2".to_vec()));
+        }
+        
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
 

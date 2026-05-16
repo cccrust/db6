@@ -76,6 +76,10 @@ impl MemTable {
             .map(|(k, v)| (k.clone(), v.get_data().unwrap().clone()))
             .collect()
     }
+
+    pub fn clear(&mut self) {
+        self.map.clear();
+    }
 }
 
 impl Default for MemTable {

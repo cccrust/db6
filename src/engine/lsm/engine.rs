@@ -36,6 +36,8 @@ impl LsmEngine {
     }
 
     pub fn open(path: &Path) -> Result<Self> {
+        std::fs::create_dir_all(path)?;
+        
         let mut engine = Self::new();
         engine.path = Some(path.to_path_buf());
         
@@ -54,27 +56,89 @@ impl LsmEngine {
             }
         }
         
-        // Try to open WAL
+        // Try to open WAL and recover
         let wal_path = path.join("wal.log");
         if wal_path.exists() {
-            engine.wal = RwLock::new(Some(Wal::open(&wal_path)?));
+            let wal = Wal::open(&wal_path)?;
+            let recovered = wal.recover()?;
+            
+            if !recovered.is_empty() {
+                // Load recovered data into memtable
+                let mut memtable = engine.memtable.write().unwrap();
+                for (k, v) in recovered {
+                    memtable.put(k, v);
+                }
+            }
+            
+            // Clear WAL after recovery
+            let _ = wal.clear();
+            
+            // Set WAL for new writes
+            engine.wal = RwLock::new(Some(Wal::create(&wal_path)?));
+        } else {
+            // Create new WAL
+            engine.wal = RwLock::new(Some(Wal::create(&wal_path)?));
         }
         
         Ok(engine)
     }
 
-    fn flush_memtable(&self) -> Result<()> {
-        let mem = self.memtable.read().unwrap();
+    fn flush_memtable(&mut self) -> Result<()> {
+        let data = {
+            let mem = self.memtable.read().unwrap();
+            mem.all_data()
+        };
+        
+        if data.is_empty() {
+            return Ok(());
+        }
         
         // Update bloom filter with all keys
-        for (k, _) in mem.all_data() {
-            self.bloom.write().unwrap().insert(&k);
+        for (k, _) in &data {
+            self.bloom.write().unwrap().insert(k);
         }
         
         // Write to WAL
         if let Ok(wal) = self.wal.read() {
             if let Some(w) = wal.as_ref() {
-                for (k, v) in mem.all_data() {
+                for (k, v) in &data {
+                    w.write(k, v)?;
+                }
+            }
+        }
+        
+        // Write to SSTable if path is set
+        if let Some(ref path) = self.path {
+            let sstable_path = path.join(format!("{}.sst", std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()));
+            
+            let sstable = SSTable::create(&sstable_path, data)?;
+            self.sstables.write().unwrap().push(sstable);
+        }
+        
+        // Clear memtable after flush
+        self.memtable.write().unwrap().clear();
+        
+        Ok(())
+    }
+
+    fn sync_wal_only(&self) -> Result<()> {
+        let data = {
+            let mem = self.memtable.read().unwrap();
+            mem.all_data()
+        };
+        
+        // Update bloom filter with all keys
+        for (k, _) in &data {
+            self.bloom.write().unwrap().insert(k);
+        }
+        
+        // Write to WAL only
+        if let Ok(wal) = self.wal.read() {
+            if let Some(w) = wal.as_ref() {
+                for (k, v) in data {
                     w.write(&k, &v)?;
                 }
             }
@@ -284,7 +348,7 @@ impl StorageEngine for LsmEngine {
         }
 
         *self.in_transaction.write().unwrap() = false;
-        self.flush_memtable()
+        self.sync_wal_only()
     }
 
     fn rollback_transaction(&mut self) -> Result<()> {
@@ -374,6 +438,53 @@ mod tests {
         let mut engine = LsmEngine::new();
         let result = engine.put(2, b"key", b"value");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_lsm_persistence() {
+        let temp_dir = std::env::temp_dir().join("db6_lsm_persist_test");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        
+        // Write data and flush
+        {
+            let mut engine = LsmEngine::open(&temp_dir).unwrap();
+            engine.put(1, b"key1", b"value1").unwrap();
+            engine.put(1, b"key2", b"value2").unwrap();
+            engine.flush().unwrap();
+        }
+        
+        // Reopen and verify
+        {
+            let engine = LsmEngine::open(&temp_dir).unwrap();
+            assert_eq!(engine.get(1, b"key1").unwrap(), Some(b"value1".to_vec()));
+            assert_eq!(engine.get(1, b"key2").unwrap(), Some(b"value2".to_vec()));
+        }
+        
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_lsm_wal_recovery() {
+        let temp_dir = std::env::temp_dir().join("db6_lsm_wal_test");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        
+        // Write data with transaction (writes to WAL)
+        {
+            let mut engine = LsmEngine::open(&temp_dir).unwrap();
+            engine.begin_transaction().unwrap();
+            engine.put(1, b"key1", b"value1").unwrap();
+            engine.put(1, b"key2", b"value2").unwrap();
+            engine.commit_transaction().unwrap();
+        }
+        
+        // Reopen and verify - WAL should be recovered
+        {
+            let engine = LsmEngine::open(&temp_dir).unwrap();
+            assert_eq!(engine.get(1, b"key1").unwrap(), Some(b"value1".to_vec()));
+            assert_eq!(engine.get(1, b"key2").unwrap(), Some(b"value2".to_vec()));
+        }
+        
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
 
