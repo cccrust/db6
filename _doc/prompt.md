@@ -50,6 +50,34 @@
     * 加入 query/ 模組，擴充 kv ，然後也能讓後端用 btree 支援 order , group 等功能。
     * 把 fts 功能也放入 query/ 中
 
+已實作（v3.1）：
+- 
+✅ WHERE 語法解析 - filter_rows() 支援 =, !=, >, >=, <, <=, LIKE
+- 
+✅ INSERT fluent - db.insert().into_table("users").values(...).execute()
+待實作：
+- 
+UPDATE fluent
+- 
+DELETE fluent
+- 
+FTS 整合
+- 
+GROUP BY / HAVING
+- 
+Transaction fluent
+建議順序：
+優先順序	功能
+1	DELETE fluent
+2	UPDATE fluent
+3	FTS 整合
+基礎需求：
+- 
+DELETE/UPDATE fluent：只需要包裝現有 engine.delete() 和 engine.put()
+- 
+FTS 整合：需先完成 KvEngine → StorageEngine trait 的橋接
+要繼續實作哪個？
+
 
 ## 工具呼叫穩定性協議（防止生成中斷）
 - 當你透過類似 `<invoke name="edit">` 的方法進行大規模的程式碼修改時，如果預估程式碼內容可能會接近你的單次最大輸出 Token 限制（max output token limit），**請絕對不要嘗試一次發送整塊龐大的程式碼**。
