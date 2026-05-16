@@ -49,34 +49,11 @@
     * kv 的 query ，也能被 db.select().where() 這樣的語法延伸使用。
     * 加入 query/ 模組，擴充 kv ，然後也能讓後端用 btree 支援 order , group 等功能。
     * 把 fts 功能也放入 query/ 中
+    * 不需要支援 JOIN 和 Subquery (那個留給 SQL 去做)
+    * 要支援 map, reduce 等函數
 
 ## 工具呼叫穩定性協議（防止生成中斷）
 - 當你透過類似 `<invoke name="edit">` 的方法進行大規模的程式碼修改時，如果預估程式碼內容可能會接近你的單次最大輸出 Token 限制（max output token limit），**請絕對不要嘗試一次發送整塊龐大的程式碼**。
 - 相反地，請執行**「分段與心跳（Split-and-Heartbeat）」模式**：將你的修改拆分成多個較小的 `<invoke>` 區塊分批執行。
 - 當使用者或終端機介面輸入 `go` 之後，請立刻從剛才在中斷處 `<parameter name="newString">` 內留下的最後一個字元，完全無縫地繼續往下生成。
-
-
-已實作 (v3.1-v3.2)：
-- 
-SELECT, INSERT, DELETE, UPDATE fluent
-- 
-WHERE filtering (=, !=, >, <, LIKE)
-- 
-ORDER BY, LIMIT
-待實作：
-功能	複雜度	說明
-Transaction fluent	低	db.begin(), db.commit(), db.rollback()
-GROUP BY / HAVING	中	group_by("age").having("count > 1")
-多元 WHERE 條件	低	where_("age > 18 AND city = 'Taipei')"
-Batch INSERT	低	db.insert().into_table("users").batch_values([[...], [...]])
-JOIN fluent	高	db.select("*").from("users").join("orders", "users.id = orders.user_id")
-Subquery	高	where_("id IN (SELECT user_id FROM vip)")
-建議下一版：
-1. 
-Transaction fluent - 最簡單，包裝現有 engine transaction 方法
-2. 
-多元 WHERE - 支援 AND/OR 組合條件
-3. 
-GROUP BY - 需要 aggregate functions (COUNT, SUM, AVG, MIN, MAX)
-要實作哪個？
 
