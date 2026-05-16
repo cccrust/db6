@@ -25,6 +25,9 @@ pub enum Error {
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),
 
+    #[error("invalid engine: {0}")]
+    InvalidEngine(String),
+
     #[error("SQL error: {0}")]
     Sql(String),
 

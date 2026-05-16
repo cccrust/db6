@@ -41,7 +41,13 @@
     * 讓 SQL 支援 FTS (Full-Text Search) 語法，像 SQLite 一樣。
 * redis 的功能，目前有哪些重要卻沒有放入本系統 kv 中的？
 * sqlite 的功能，目前有哪些重要卻沒有放入本系統 sql 中的？
-* 仿照 redis 加入 message queue 的功能
+* 利用 kv/ ，仿照 redis 加入 message queue 的功能
+    * 放在 msgq/ 下
+* Fluent Interface	語法風格: query/ 模組
+    * 連續點點點（Method Chaining）的設計模式	db.select().where().hidden()
+    * sql 語法經常被 mapping 為 Fluent Interface 語法風格
+    * kv 的 query ，也能被 db.select().where() 這樣的語法延伸使用。
+    * 加入 query/ 模組，擴充 kv ，然後也能讓後端用 btree 支援 order , group 等功能。
 
 
 ## 工具呼叫穩定性協議（防止生成中斷）
