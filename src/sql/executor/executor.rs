@@ -326,11 +326,12 @@ pub struct ResultSet {
 
 pub struct Executor {
     engine: Box<dyn StorageEngine>,
+    views: std::collections::HashMap<String, crate::sql::parser::ast::SelectStmt>,
 }
 
 impl Executor {
     pub fn new(engine: Box<dyn StorageEngine>) -> Self {
-        Self { engine }
+        Self { engine, views: std::collections::HashMap::new() }
     }
 
     pub fn execute(&mut self, sql: &str) -> Result<ResultSet> {
@@ -345,6 +346,12 @@ impl Executor {
         match stmt {
             crate::sql::parser::ast::Statement::Select(select) => {
                 self.execute_select(select)
+            }
+            crate::sql::parser::ast::Statement::CreateView(view_stmt) => {
+                self.execute_create_view(view_stmt)
+            }
+            crate::sql::parser::ast::Statement::DropView(drop_stmt) => {
+                self.execute_drop_view(drop_stmt)
             }
             crate::sql::parser::ast::Statement::Insert(insert) => {
                 self.execute_insert(insert)
@@ -371,6 +378,10 @@ impl Executor {
     fn execute_select(&mut self, select: &crate::sql::parser::ast::SelectStmt) -> Result<ResultSet> {
         let from_item = select.from.as_ref().ok_or_else(|| Error::Sql("No table specified".into()))?;
         let main_table = get_table_name_from_from_item(from_item);
+
+        if let Some(view_query) = self.views.get(&main_table).cloned() {
+            return self.execute_select(&view_query);
+        }
 
         let start = get_table_prefix(&main_table);
         let end = format!("{};", main_table).into_bytes();
@@ -552,6 +563,23 @@ impl Executor {
         Ok(ResultSet { columns: vec![], rows: vec![], affected })
     }
 
+    fn execute_create_view(&mut self, stmt: &crate::sql::parser::ast::CreateViewStmt) -> Result<ResultSet> {
+        let query = stmt.query.as_ref().clone();
+        self.views.insert(stmt.name.clone(), query);
+        Ok(ResultSet { columns: vec![], rows: vec![], affected: 0 })
+    }
+
+    fn execute_drop_view(&mut self, stmt: &crate::sql::parser::ast::DropViewStmt) -> Result<ResultSet> {
+        if stmt.if_exists {
+            self.views.remove(&stmt.name);
+        } else if let Some(_) = self.views.remove(&stmt.name) {
+            // removed
+        } else {
+            return Err(Error::Sql(format!("View '{}' not found", stmt.name)));
+        }
+        Ok(ResultSet { columns: vec![], rows: vec![], affected: 0 })
+    }
+
     fn execute_update(&mut self, update: &crate::sql::parser::ast::UpdateStmt) -> Result<ResultSet> {
         let table_prefix = get_table_prefix(&update.table);
         let table_end = format!("{};", update.table);
@@ -730,11 +758,12 @@ mod tests {
 
 pub struct SqlExecutor<E: crate::engine::StorageEngine> {
     engine: E,
+    views: std::collections::HashMap<String, crate::sql::parser::ast::SelectStmt>,
 }
 
 impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
     pub fn new(engine: E) -> Self {
-        Self { engine }
+        Self { engine, views: std::collections::HashMap::new() }
     }
 
     pub fn execute_order_by(&mut self, sql: &str) -> Result<ResultSet>
@@ -771,6 +800,12 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
             crate::sql::parser::ast::Statement::Select(select) => {
                 self.execute_select(select)
             }
+            crate::sql::parser::ast::Statement::CreateView(view_stmt) => {
+                self.execute_create_view(view_stmt)
+            }
+            crate::sql::parser::ast::Statement::DropView(drop_stmt) => {
+                self.execute_drop_view(drop_stmt)
+            }
             crate::sql::parser::ast::Statement::Insert(insert) => {
                 self.execute_insert(insert)
             }
@@ -787,6 +822,10 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
     fn execute_select(&mut self, select: &crate::sql::parser::ast::SelectStmt) -> Result<ResultSet> {
         let from_item = select.from.as_ref().ok_or_else(|| Error::Sql("No table specified".into()))?;
         let main_table = get_table_name_from_from_item(from_item);
+
+        if let Some(view_query) = self.views.get(&main_table).cloned() {
+            return self.execute_select(&view_query);
+        }
 
         let start = get_table_prefix(&main_table);
         let end = format!("{};", main_table).into_bytes();
@@ -904,6 +943,23 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
         }
 
         Ok(ResultSet { columns: vec![], rows: vec![], affected })
+    }
+
+    fn execute_create_view(&mut self, stmt: &crate::sql::parser::ast::CreateViewStmt) -> Result<ResultSet> {
+        let query = stmt.query.as_ref().clone();
+        self.views.insert(stmt.name.clone(), query);
+        Ok(ResultSet { columns: vec![], rows: vec![], affected: 0 })
+    }
+
+    fn execute_drop_view(&mut self, stmt: &crate::sql::parser::ast::DropViewStmt) -> Result<ResultSet> {
+        if stmt.if_exists {
+            self.views.remove(&stmt.name);
+        } else if let Some(_) = self.views.remove(&stmt.name) {
+            // removed
+        } else {
+            return Err(Error::Sql(format!("View '{}' not found", stmt.name)));
+        }
+        Ok(ResultSet { columns: vec![], rows: vec![], affected: 0 })
     }
 
     fn execute_update(&mut self, update: &crate::sql::parser::ast::UpdateStmt) -> Result<ResultSet> {
