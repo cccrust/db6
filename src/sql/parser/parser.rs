@@ -1229,16 +1229,45 @@ impl Parser {
             path.push(self.eat_ident()?);
         }
 
-        // 解析運算子和值
-        let (op_kind, negated, value) = self.parse_json_path_op()?;
-        let value = Box::new(value);
+        // Check if there is an operator
+        match self.peek() {
+            Token::Is | Token::In | Token::Like | Token::Not |
+            Token::Eq | Token::NotEq | Token::Lt | Token::LtEq | Token::Gt | Token::GtEq => {
+                let (op_kind, negated, value) = self.parse_json_path_op()?;
+                
+                if op_kind == JsonPathOpKind::In && matches!(value, Expr::ScalarSubquery(_)) {
+                    if let Expr::ScalarSubquery(query) = value {
+                        return Ok(Expr::InSubquery {
+                            expr: Box::new(Expr::JsonPath {
+                                path,
+                                op: JsonPathOpKind::Eq,
+                                negated: false,
+                                value: Box::new(Expr::LitNull)
+                            }),
+                            query,
+                            negated,
+                        });
+                    }
+                }
+                
+                let value = Box::new(value);
 
-        Ok(Expr::JsonPath {
-            path,
-            op: op_kind,
-            negated,
-            value,
-        })
+                Ok(Expr::JsonPath {
+                    path,
+                    op: op_kind,
+                    negated,
+                    value,
+                })
+            }
+            _ => {
+                Ok(Expr::JsonPath {
+                    path,
+                    op: JsonPathOpKind::Eq,
+                    negated: false,
+                    value: Box::new(Expr::LitNull),
+                })
+            }
+        }
     }
 
     /// 解析 JSON Path 運算子
@@ -1259,6 +1288,11 @@ impl Parser {
         } else { false };
         if self.maybe(&Token::In) {
             self.eat(&Token::LParen)?;
+            if self.check(&Token::Select) || self.check(&Token::With) {
+                let query = self.parse_select()?;
+                self.eat(&Token::RParen)?;
+                return Ok((JsonPathOpKind::In, negated_in, Expr::ScalarSubquery(Box::new(query))));
+            }
             let list = self.parse_expr_list()?;
             self.eat(&Token::RParen)?;
             let list_exprs: Vec<Expr> = list;

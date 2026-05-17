@@ -132,6 +132,105 @@ fn json_path_get(json_str: &str, path: &[String]) -> String {
     String::new()
 }
 
+fn collect_subquery_values(
+    query: &crate::sql::parser::ast::SelectStmt,
+    engine: &dyn StorageEngine,
+) -> Vec<String> {
+    use crate::sql::parser::ast::SelectItem;
+
+    let main_table = match &query.from {
+        Some(from_item) => get_table_name_from_from_item(from_item),
+        None => return vec![],
+    };
+
+    let prefix = get_table_prefix(&main_table);
+    let end = format!("{};", main_table);
+    let rows = match engine.scan(1, &prefix, end.as_bytes()) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    if query.columns.is_empty() {
+        return rows.iter().map(|(_, v)| String::from_utf8_lossy(v).to_string()).collect();
+    }
+
+    let mut values = Vec::new();
+    for row in &rows {
+        let val = String::from_utf8_lossy(&row.1).to_string();
+        if let crate::sql::parser::ast::SelectItem::Expr { expr, .. } = &query.columns[0] {
+            match expr {
+                crate::sql::parser::ast::Expr::Column { name, .. } if name == "key" => {
+                    values.push(String::from_utf8_lossy(&row.0).to_string());
+                }
+                crate::sql::parser::ast::Expr::Column { name, .. } => {
+                    values.push(json_path_get(&val, &[name.clone()]));
+                }
+                crate::sql::parser::ast::Expr::JsonPath { path, .. } => {
+                    values.push(json_path_get(&val, path));
+                }
+                crate::sql::parser::ast::Expr::LitStr(s) => {
+                    values.push(s.clone());
+                }
+                crate::sql::parser::ast::Expr::LitInt(i) => {
+                    values.push(i.to_string());
+                }
+                _ => {
+                    values.push(val);
+                }
+            }
+        } else {
+            values.push(val);
+        }
+    }
+    values
+}
+
+fn eval_expr_with_subqueries(
+    expr: &crate::sql::parser::ast::Expr,
+    value: &[u8],
+    engine: &dyn StorageEngine,
+) -> bool {
+    use crate::sql::parser::ast::Expr;
+
+    match expr {
+        Expr::Exists { query, negated } => {
+            let values = collect_subquery_values(query, engine);
+            let exists = !values.is_empty();
+            if *negated { !exists } else { exists }
+        }
+        Expr::InSubquery { expr: left_expr, query, negated } => {
+            let values = collect_subquery_values(query, engine);
+            let left_val = match left_expr.as_ref() {
+                Expr::Column { name, .. } if name == "key" => String::from_utf8_lossy(value).to_string(),
+                Expr::Column { name, .. } => {
+                    let json_str = String::from_utf8_lossy(value);
+                    json_path_get(&json_str, &[name.clone()])
+                }
+                Expr::JsonPath { path, .. } => {
+                    let json_str = String::from_utf8_lossy(value);
+                    json_path_get(&json_str, path)
+                }
+                _ => String::from_utf8_lossy(value).to_string(),
+            };
+            let found = values.contains(&left_val);
+            if *negated { !found } else { found }
+        }
+        Expr::BinOp { left, op, right } => {
+            let left_result = eval_expr_with_subqueries(left, value, engine);
+            let right_result = eval_expr_with_subqueries(right, value, engine);
+            match op {
+                crate::sql::parser::ast::BinOp::And => left_result && right_result,
+                crate::sql::parser::ast::BinOp::Or => left_result || right_result,
+                _ => eval_expr(expr, value), // Fall back for regular comparisons
+            }
+        }
+        Expr::UnaryOp { op: crate::sql::parser::ast::UnaryOp::Not, expr } => {
+            !eval_expr_with_subqueries(expr, value, engine)
+        }
+        _ => eval_expr(expr, value), // Fall back to regular eval
+    }
+}
+
 fn get_table_name_from_from_item(from: &crate::sql::parser::ast::FromItem) -> String {
     match from {
         crate::sql::parser::ast::FromItem::Table(table_ref) => table_ref.name.clone(),
@@ -273,17 +372,12 @@ impl Executor {
         let from_item = select.from.as_ref().ok_or_else(|| Error::Sql("No table specified".into()))?;
         let main_table = get_table_name_from_from_item(from_item);
 
-        let (start, end) = if select.joins.is_empty() {
-            (b"".to_vec(), b"".to_vec())
-        } else {
-            let prefix = get_table_prefix(&main_table);
-            let end = format!("{};", main_table);
-            (prefix, end.into_bytes())
-        };
+        let start = get_table_prefix(&main_table);
+        let end = format!("{};", main_table).into_bytes();
         let mut rows = self.engine.scan(1, &start, &end)?;
 
         if let Some(ref where_expr) = select.where_ {
-            rows.retain(|(k, v)| eval_expr(where_expr, v));
+            rows.retain(|(k, v)| eval_expr_with_subqueries(where_expr, v, &*self.engine));
         }
 
         for join in &select.joins {
@@ -372,12 +466,39 @@ impl Executor {
             });
         }
 
-        let mut result_rows: Vec<Vec<String>> = rows.iter().map(|(k, v)| {
-            vec![
-                String::from_utf8_lossy(k).to_string(),
-                String::from_utf8_lossy(v).to_string(),
-            ]
-        }).collect();
+        let mut result_rows: Vec<Vec<String>> = Vec::new();
+        for (k, v) in &rows {
+            let k_str = String::from_utf8_lossy(k).to_string();
+            let v_str = String::from_utf8_lossy(v).to_string();
+            
+            if select.columns.is_empty() || select.columns.iter().any(|c| matches!(c, crate::sql::parser::ast::SelectItem::Star)) {
+                result_rows.push(vec![k_str, v_str]);
+            } else {
+                let mut output_row = Vec::new();
+                for col in &select.columns {
+                    if let crate::sql::parser::ast::SelectItem::Expr { expr, .. } = col {
+                        match expr {
+                            crate::sql::parser::ast::Expr::Column { name, .. } if name == "key" => {
+                                output_row.push(k_str.clone());
+                            }
+                            crate::sql::parser::ast::Expr::Column { name, .. } if name == "value" => {
+                                output_row.push(v_str.clone());
+                            }
+                            crate::sql::parser::ast::Expr::Column { name, .. } => {
+                                output_row.push(json_path_get(&v_str, &[name.clone()]));
+                            }
+                            crate::sql::parser::ast::Expr::JsonPath { path, .. } => {
+                                output_row.push(json_path_get(&v_str, path));
+                            }
+                            _ => output_row.push(v_str.clone()),
+                        }
+                    } else {
+                        output_row.push(v_str.clone());
+                    }
+                }
+                result_rows.push(output_row);
+            }
+        }
 
         if let Some(limit_expr) = &select.limit {
             if let crate::sql::parser::ast::Expr::LitInt(n) = limit_expr {
@@ -412,7 +533,13 @@ impl Executor {
         for row in &insert.values {
             if !row.is_empty() {
                 let (key, value) = if row.len() >= 2 {
-                    (eval_lit(&row[0]), eval_lit(&row[1]))
+                    let k = eval_lit(&row[0]);
+                    let prefixed = if k.starts_with(&format!("{}:", table)) {
+                        k
+                    } else {
+                        format!("{}:{}", table, k)
+                    };
+                    (prefixed, eval_lit(&row[1]))
                 } else {
                     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
                     (format!("{}:{}", table, id), eval_lit(&row[0]))
@@ -561,6 +688,40 @@ mod tests {
         let result = exec.execute("INSERT INTO test VALUES ('hello')").unwrap();
         assert_eq!(result.affected, 1);
     }
+
+    #[test]
+    fn test_subquery_in_list() {
+        let engine = crate::engine::BTreeMemoryEngine::new();
+        let mut exec = Executor::new(Box::new(engine));
+
+        exec.execute("INSERT INTO users VALUES ('{\"name\":\"Alice\"}')").unwrap();
+        exec.execute("INSERT INTO users VALUES ('{\"name\":\"Bob\"}')").unwrap();
+        exec.execute("INSERT INTO users VALUES ('{\"name\":\"Charlie\"}')").unwrap();
+        exec.execute("INSERT INTO approved VALUES ('{\"name\":\"Alice\"}')").unwrap();
+        exec.execute("INSERT INTO approved VALUES ('{\"name\":\"Carol\"}')").unwrap();
+
+        let result = exec.execute(
+            "SELECT * FROM users WHERE @.name IN (SELECT @.name FROM approved)"
+        ).unwrap();
+        assert_eq!(result.rows.len(), 1, "Should have 1 user (only Alice is in approved)");
+        assert!(result.rows[0][1].contains("Alice"), "Should be Alice");
+    }
+
+    #[test]
+    fn test_subquery_select_column() {
+        let engine = crate::engine::BTreeMemoryEngine::new();
+        let mut exec = Executor::new(Box::new(engine));
+
+        exec.execute("INSERT INTO t1 VALUES ('key1', 'v1')").unwrap();
+        exec.execute("INSERT INTO t1 VALUES ('key2', 'v2')").unwrap();
+        exec.execute("INSERT INTO t1 VALUES ('key3', 'v3')").unwrap();
+
+        let result = exec.execute("SELECT value FROM t1").unwrap();
+        assert_eq!(result.rows.len(), 3, "Should have 3 rows");
+        assert_eq!(result.rows[0][0], "v1", "First row value should be v1");
+        assert_eq!(result.rows[1][0], "v2", "Second row value should be v2");
+        assert_eq!(result.rows[2][0], "v3", "Third row value should be v3");
+    }
 }
 
 // =============================================================================
@@ -624,14 +785,15 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
     }
 
     fn execute_select(&mut self, select: &crate::sql::parser::ast::SelectStmt) -> Result<ResultSet> {
-        let _table = select.from.as_ref().ok_or_else(|| Error::Sql("No table specified".into()))?;
+        let from_item = select.from.as_ref().ok_or_else(|| Error::Sql("No table specified".into()))?;
+        let main_table = get_table_name_from_from_item(from_item);
 
-        let start = b"".to_vec();
-        let end = b"".to_vec();
+        let start = get_table_prefix(&main_table);
+        let end = format!("{};", main_table).into_bytes();
         let mut rows = self.engine.scan(1, &start, &end)?;
 
         if let Some(ref where_expr) = select.where_ {
-            rows.retain(|(k, v)| eval_expr(where_expr, v));
+            rows.retain(|(k, v)| eval_expr_with_subqueries(where_expr, v, &self.engine));
         }
 
         if !select.group_by.is_empty() {
@@ -658,12 +820,39 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
             });
         }
 
-        let mut result_rows: Vec<Vec<String>> = rows.iter().map(|(k, v)| {
-            vec![
-                String::from_utf8_lossy(k).to_string(),
-                String::from_utf8_lossy(v).to_string(),
-            ]
-        }).collect();
+        let mut result_rows: Vec<Vec<String>> = Vec::new();
+        for (k, v) in &rows {
+            let k_str = String::from_utf8_lossy(k).to_string();
+            let v_str = String::from_utf8_lossy(v).to_string();
+            
+            if select.columns.is_empty() || select.columns.iter().any(|c| matches!(c, crate::sql::parser::ast::SelectItem::Star)) {
+                result_rows.push(vec![k_str, v_str]);
+            } else {
+                let mut output_row = Vec::new();
+                for col in &select.columns {
+                    if let crate::sql::parser::ast::SelectItem::Expr { expr, .. } = col {
+                        match expr {
+                            crate::sql::parser::ast::Expr::Column { name, .. } if name == "key" => {
+                                output_row.push(k_str.clone());
+                            }
+                            crate::sql::parser::ast::Expr::Column { name, .. } if name == "value" => {
+                                output_row.push(v_str.clone());
+                            }
+                            crate::sql::parser::ast::Expr::Column { name, .. } => {
+                                output_row.push(json_path_get(&v_str, &[name.clone()]));
+                            }
+                            crate::sql::parser::ast::Expr::JsonPath { path, .. } => {
+                                output_row.push(json_path_get(&v_str, path));
+                            }
+                            _ => output_row.push(v_str.clone()),
+                        }
+                    } else {
+                        output_row.push(v_str.clone());
+                    }
+                }
+                result_rows.push(output_row);
+            }
+        }
 
         if let Some(limit_expr) = &select.limit {
             if let crate::sql::parser::ast::Expr::LitInt(n) = limit_expr {
@@ -698,7 +887,13 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
         for row in &insert.values {
             if !row.is_empty() {
                 let (key, value) = if row.len() >= 2 {
-                    (eval_lit(&row[0]), eval_lit(&row[1]))
+                    let k = eval_lit(&row[0]);
+                    let prefixed = if k.starts_with(&format!("{}:", table)) {
+                        k
+                    } else {
+                        format!("{}:{}", table, k)
+                    };
+                    (prefixed, eval_lit(&row[1]))
                 } else {
                     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
                     (format!("{}:{}", table, id), eval_lit(&row[0]))

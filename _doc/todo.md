@@ -46,14 +46,14 @@
 - [x] INNER JOIN / LEFT JOIN
 
 ### v3.15 - SQL Executor 完整實作
-- [ ] INSERT executor
-- [ ] SELECT executor
-- [ ] UPDATE executor
-- [ ] DELETE executor
+- [x] INSERT executor
+- [x] SELECT executor
+- [x] UPDATE executor
+- [x] DELETE executor
 
 ### v3.16 - 子查詢 (Subquery)
-- [ ] IN subquery
-- [ ] EXISTS subquery
+- [x] IN subquery
+- [x] EXISTS subquery
 
 ### v3.17 - 視圖 (View)
 - [ ] create_view / drop_view
