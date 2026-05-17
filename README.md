@@ -6,9 +6,14 @@
 [crates-badge]: https://img.shields.io/crates/v/db6.svg
 [crates-url]: https://crates.io/crates/db6
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
-[mit-url]: https://github.com/cccrust/db6/blob/main/LICENSE
+[mit-url]: https://github.com/cccrust/db6
 
-Unified database with pluggable storage engines + KV + SQL + FTS + Message Queue.
+Unified database with pluggable storage engines (Memory / BTree / LSM).
+
+- **KV**: Key-Value store
+- **SQL**: Parser + Planner + Executor
+- **FTS**: Full-Text Search with BM25 ranking
+- **Msgq**: Message Queue (sync & async)
 
 ## Installation
 
@@ -19,22 +24,20 @@ cargo add db6
 ## Quick Start
 
 ```bash
-cargo build    # Build
-cargo test     # Run all tests
-cargo run      # REPL
+cargo build
+cargo test
+cargo run
 ```
 
 ## Storage Engines
 
 | Engine | Backend | Features | Use Case |
 |--------|---------|----------|----------|
-| Memory | BTreeMap | In-memory KV, ORDER BY, range scan | Prototyping, cache |
-| BTree  | Disk BTree | Full transactions, persistence | SQLite-compatible |
-| LSM    | LSM-tree | Bloom filter, WAL, high write throughput | Write-heavy workloads |
+| Memory | BTreeMap (in-memory) | ORDER BY, range scan | Prototyping, cache |
+| BTree | Disk BTree | Full transactions, persistence | General purpose |
+| LSM | LSM-tree | Bloom filter, WAL, high write throughput | Write-heavy workloads |
 
 ## Key-Value API
-
-Any storage engine implements `StorageEngine` trait. Use `KvEngine` for engine-agnostic access:
 
 ```rust
 use db6::{KvEngine, KvStore};
@@ -73,9 +76,9 @@ let rows = db.select("name, email")
 use db6::{FtsIndex, FtsTokenizer, CjkTokenizer};
 
 let mut index = FtsIndex::new(engine);
-index.insert(1, "資料庫系統")?;
-let results = index.search("資料")?;
-let ranked = index.search_bm25("資料")?;
+index.insert(1, "database system")?;
+let results = index.search("data")?;
+let ranked = index.search_bm25("data")?;
 ```
 
 ## Message Queue
@@ -97,8 +100,6 @@ queue.ack(&msg.unwrap().id)?;
 # e.g. ./pub.sh 4.14.0
 ```
 
-The script updates `Cargo.toml`, runs tests, commits to git, pushes to GitHub, and publishes to crates.io.
-
 ## Version History
 
 | Phase | Version | Features |
@@ -106,14 +107,14 @@ The script updates `Cargo.toml`, runs tests, commits to git, pushes to GitHub, a
 | v0.x | 0.x | StorageEngine trait + 3 engines |
 | v1.0+ | 1.x | FTS (inverted index + BM25) |
 | v2.0+ | 2.x | SQL (parser, planner, executor) |
-| v3.0+ | 3.x | Query fluent API + LSM enhancements |
+| v3.0+ | 3.x | Fluent API + LSM enhancements |
 | v4.0+ | 4.x | Message Queue (sync + async) |
 
 ## Related Projects
 
-- [btree6](https://github.com/cccrust/btree6) — BTree engine
-- [lsm5](https://github.com/cccrust/lsm5) — LSM engine
-- [sp6](https://github.com/cccrust/sp6) — SQL implementation
+- [btree6](https://github.com/cccrust/btree6)
+- [lsm5](https://github.com/cccrust/lsm5)
+- [sp6](https://github.com/cccrust/sp6)
 
 ## License
 
