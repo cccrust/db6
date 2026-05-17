@@ -6,6 +6,7 @@ mod sync_queue;
 mod sync_pubsub;
 mod async_queue;
 mod async_pubsub;
+mod sql;
 
 pub use error::{MsgqError, Result};
 pub use message::SyncQueueMessage;
@@ -13,6 +14,7 @@ pub use sync_queue::{SyncQueue, QueueMeta, QueueConfig};
 pub use sync_pubsub::{SyncPubSub, SyncPubSubMessage, PubSubConfig, TopicMatcher};
 pub use async_queue::{AsyncQueue, AsyncQueueMessage, AsyncMsgq, AsyncQueueConfig, AsyncQueueStream, RetryConfig, with_retry, ExactlyOnceQueue, QueueMetrics, QueueHealth, HealthStatus};
 pub use async_pubsub::{AsyncPubSub, AsyncPubSubMessage, AsyncPatternSubscriber};
+pub use sql::{AsyncSqlExecutor, SyncSqlExecutor, JobResult, ResultStore, SqlJob};
 
 use crate::kv::{KvEngine, KvStore};
 use std::path::Path;
