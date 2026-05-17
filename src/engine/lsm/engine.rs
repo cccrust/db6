@@ -1,4 +1,14 @@
-//! LsmEngine implementation
+//! LSM-Tree 儲存引擎實作
+//!
+//! LSM-Tree (Log-Structured Merge-Tree) 是一種針對高寫入吞吐量優化的資料結構。
+//! 核心概念：寫入先進入記憶體 (MemTable)，累積到一定大小後合併寫入磁碟 (SSTable)。
+//!
+//! 寫入路徑：
+//!   put → MemTable → (flush) → SSTable
+//! 讀取路徑：
+//!   get → MemTable → Bloom Filter → SSTables (由新到舊)
+//!
+//! 限制：目前只支援 `table_id = 1`（單一表空間）。
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -12,6 +22,15 @@ use super::sstable::SSTable;
 use super::wal::Wal;
 use super::bloom::BloomFilter;
 
+/// LSM-Tree 引擎主結構
+///
+/// - `path`: 持久化路徑
+/// - `memtable`: 記憶體寫入緩衝區
+/// - `sstables`: 磁碟上的 SSTable 集合（由舊到新）
+/// - `bloom`: 布隆過濾器，快速排除不存在的鍵
+/// - `wal`: 預寫式日誌，確保資料不遺失
+/// - `in_transaction`: 交易狀態
+/// - `tx_buffer`: 交易緩衝區
 pub struct LsmEngine {
     path: Option<std::path::PathBuf>,
     memtable: RwLock<MemTable>,
@@ -23,6 +42,7 @@ pub struct LsmEngine {
 }
 
 impl LsmEngine {
+    /// 建立一個新的記憶體 LSM 引擎（無持久化）
     pub fn new() -> Self {
         LsmEngine {
             path: None,
@@ -35,13 +55,19 @@ impl LsmEngine {
         }
     }
 
+    /// 從磁碟路徑開啟或建立 LSM 引擎
+    ///
+    /// 啟動流程：
+    /// 1. 掃描目錄中所有的 `.sst` 檔案，載入現有 SSTable
+    /// 2. 嘗試開啟 `wal.log` 並復原未 flush 的資料
+    /// 3. 清空 WAL 並建立新的日誌
     pub fn open(path: &Path) -> Result<Self> {
         std::fs::create_dir_all(path)?;
-        
+
         let mut engine = Self::new();
         engine.path = Some(path.to_path_buf());
-        
-        // Try to load existing SSTables
+
+        // 步驟1：載入現有的 SSTable
         if path.exists() {
             if let Ok(entries) = std::fs::read_dir(path) {
                 let mut sstables = engine.sstables.write().unwrap();
@@ -55,50 +81,57 @@ impl LsmEngine {
                 }
             }
         }
-        
-        // Try to open WAL and recover
+
+        // 步驟2：從 WAL 復原資料
         let wal_path = path.join("wal.log");
         if wal_path.exists() {
             let wal = Wal::open(&wal_path)?;
             let recovered = wal.recover()?;
-            
+
             if !recovered.is_empty() {
-                // Load recovered data into memtable
                 let mut memtable = engine.memtable.write().unwrap();
                 for (k, v) in recovered {
                     memtable.put(k, v);
                 }
             }
-            
-            // Clear WAL after recovery
+
+            // 清空 WAL（資料已復原到 MemTable）
             let _ = wal.clear();
-            
-            // Set WAL for new writes
+
+            // 建立新的 WAL
             engine.wal = RwLock::new(Some(Wal::create(&wal_path)?));
         } else {
-            // Create new WAL
+            // 建立新的 WAL
             engine.wal = RwLock::new(Some(Wal::create(&wal_path)?));
         }
-        
+
         Ok(engine)
     }
 
+    /// 將 MemTable flush 到磁碟
+    ///
+    /// 流程：
+    /// 1. 讀取 MemTable 中所有資料
+    /// 2. 更新 Bloom Filter
+    /// 3. 寫入 WAL
+    /// 4. 建立新的 SSTable 檔案
+    /// 5. 清空 MemTable
     fn flush_memtable(&mut self) -> Result<()> {
         let data = {
             let mem = self.memtable.read().unwrap();
             mem.all_data()
         };
-        
+
         if data.is_empty() {
             return Ok(());
         }
-        
-        // Update bloom filter with all keys
+
+        // 更新 Bloom Filter
         for (k, _) in &data {
             self.bloom.write().unwrap().insert(k);
         }
-        
-        // Write to WAL
+
+        // 寫入 WAL
         if let Ok(wal) = self.wal.read() {
             if let Some(w) = wal.as_ref() {
                 for (k, v) in &data {
@@ -106,36 +139,38 @@ impl LsmEngine {
                 }
             }
         }
-        
-        // Write to SSTable if path is set
+
+        // 建立 SSTable（僅在有設定路徑時）
         if let Some(ref path) = self.path {
             let sstable_path = path.join(format!("{}.sst", std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()));
-            
+
             let sstable = SSTable::create(&sstable_path, data)?;
             self.sstables.write().unwrap().push(sstable);
         }
-        
-        // Clear memtable after flush
+
+        // 清空 MemTable
         self.memtable.write().unwrap().clear();
-        
+
         Ok(())
     }
 
+    /// 僅寫入 WAL（不產生 SSTable）
+    ///
+    /// 用於交易 commit 時確保資料持久化，
+    /// 但暫不觸發 MemTable → SSTable 的合併。
     fn sync_wal_only(&self) -> Result<()> {
         let data = {
             let mem = self.memtable.read().unwrap();
             mem.all_data()
         };
-        
-        // Update bloom filter with all keys
+
         for (k, _) in &data {
             self.bloom.write().unwrap().insert(k);
         }
-        
-        // Write to WAL only
+
         if let Ok(wal) = self.wal.read() {
             if let Some(w) = wal.as_ref() {
                 for (k, v) in data {
@@ -143,7 +178,7 @@ impl LsmEngine {
                 }
             }
         }
-        
+
         Ok(())
     }
 }
@@ -153,6 +188,8 @@ impl Default for LsmEngine {
         Self::new()
     }
 }
+
+// ===== StorageEngine trait 實作 =====
 
 impl StorageEngine for LsmEngine {
     fn open(path: &Path) -> Result<Box<dyn StorageEngine>> {
@@ -167,8 +204,15 @@ impl StorageEngine for LsmEngine {
         "lsm"
     }
 
+    /// 讀取一筆資料
+    ///
+    /// 查詢路徑（由快到慢）：
+    /// 1. 交易緩衝區
+    /// 2. MemTable（記憶體）
+    /// 3. Bloom Filter（快速排除）
+    /// 4. SSTable（磁碟，由新到舊）
     fn get(&self, table_id: u32, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        // Check transaction buffer first
+        // 步驟1：查交易緩衝區
         if let Ok(tx) = self.tx_buffer.read() {
             if let Some(buffer) = tx.as_ref() {
                 if let Some(value) = buffer.get(key) {
@@ -180,7 +224,7 @@ impl StorageEngine for LsmEngine {
             }
         }
 
-        // Check memtable
+        // 步驟2：查 MemTable
         let mem = self.memtable.read().unwrap();
         if let Some(v) = mem.get(key) {
             if v.is_data() {
@@ -191,12 +235,12 @@ impl StorageEngine for LsmEngine {
         }
         drop(mem);
 
-        // Check bloom filter first
+        // 步驟3：Bloom Filter 快速排除
         if !self.bloom.read().unwrap().might_contain(key) {
             return Ok(None);
         }
 
-        // Check SSTables
+        // 步驟4：從 SSTable 由新到舊查詢
         let sstables = self.sstables.read().unwrap();
         for ss in sstables.iter().rev() {
             if let Some(v) = ss.get(key) {
@@ -207,6 +251,7 @@ impl StorageEngine for LsmEngine {
         Ok(None)
     }
 
+    /// 寫入一筆資料（與 BTree 引擎不同，LSM 的所有 table_id 都對應 table_id=1）
     fn put(&mut self, table_id: u32, key: &[u8], value: &[u8]) -> Result<()> {
         if table_id != 1 {
             return Err(Error::NotSupported("LSM engine only supports table_id=1".into()));
@@ -225,6 +270,7 @@ impl StorageEngine for LsmEngine {
         Ok(())
     }
 
+    /// 刪除一筆資料（使用 tombstone 標記）
     fn delete(&mut self, table_id: u32, key: &[u8]) -> Result<()> {
         if table_id != 1 {
             return Err(Error::NotSupported("LSM engine only supports table_id=1".into()));
@@ -243,10 +289,11 @@ impl StorageEngine for LsmEngine {
         Ok(())
     }
 
+    /// 範圍掃描（僅掃描 MemTable，不掃描 SSTable）
     fn scan(&self, _table_id: u32, start: &[u8], end: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let mut results = self.memtable.read().unwrap().scan(start, end);
-        
-        // Apply transaction buffer
+
+        // 套用交易緩衝區的修改
         if let Ok(tx) = self.tx_buffer.read() {
             if let Some(buffer) = tx.as_ref() {
                 for (key, value) in buffer.iter() {
@@ -265,6 +312,7 @@ impl StorageEngine for LsmEngine {
         Ok(results)
     }
 
+    /// 批量寫入
     fn batch_put(&mut self, table_id: u32, pairs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()> {
         if table_id != 1 {
             return Err(Error::NotSupported("LSM engine only supports table_id=1".into()));
@@ -288,6 +336,7 @@ impl StorageEngine for LsmEngine {
         Ok(())
     }
 
+    /// 範圍刪除
     fn range_delete(&mut self, table_id: u32, start: &[u8], end: &[u8]) -> Result<()> {
         if table_id != 1 {
             return Err(Error::NotSupported("LSM engine only supports table_id=1".into()));
@@ -316,14 +365,17 @@ impl StorageEngine for LsmEngine {
         Ok(())
     }
 
+    /// 將 MemTable flush 到 SSTable
     fn flush(&mut self) -> Result<()> {
         self.flush_memtable()
     }
 
+    /// 同 flush
     fn sync(&mut self) -> Result<()> {
         self.flush_memtable()
     }
 
+    /// 開始交易
     fn begin_transaction(&mut self) -> Result<()> {
         if *self.in_transaction.read().unwrap() {
             return Err(Error::Transaction("Transaction already active".into()));
@@ -332,6 +384,7 @@ impl StorageEngine for LsmEngine {
         Ok(())
     }
 
+    /// 提交交易：將緩衝區寫入 MemTable 並同步 WAL
     fn commit_transaction(&mut self) -> Result<()> {
         if !*self.in_transaction.read().unwrap() {
             return Err(Error::Transaction("No active transaction".into()));
@@ -351,6 +404,7 @@ impl StorageEngine for LsmEngine {
         self.sync_wal_only()
     }
 
+    /// 回滾交易：直接捨棄緩衝區
     fn rollback_transaction(&mut self) -> Result<()> {
         if !*self.in_transaction.read().unwrap() {
             return Err(Error::Transaction("No active transaction".into()));
@@ -360,10 +414,12 @@ impl StorageEngine for LsmEngine {
         Ok(())
     }
 
+    /// 是否有活躍交易
     fn has_transaction(&self) -> bool {
         *self.in_transaction.read().unwrap()
     }
 
+    /// 取得統計資訊（MemTable + SSTable 的鍵數量）
     fn stats(&self) -> EngineStats {
         let mem_keys = self.memtable.read().unwrap().len() as u64;
         let sstable_keys: u64 = self.sstables.read().unwrap().iter().map(|s| s.len()).sum();
@@ -377,10 +433,13 @@ impl StorageEngine for LsmEngine {
     }
 }
 
+// ===== 單元測試 =====
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// 測試基本的 put/get 操作
     #[test]
     fn test_lsm_basic() {
         let mut engine = LsmEngine::new();
@@ -389,6 +448,7 @@ mod tests {
         assert_eq!(engine.get(1, b"missing").unwrap(), None);
     }
 
+    /// 測試範圍掃描
     #[test]
     fn test_lsm_scan() {
         let mut engine = LsmEngine::new();
@@ -400,6 +460,7 @@ mod tests {
         assert!(results.len() >= 2);
     }
 
+    /// 測試刪除操作
     #[test]
     fn test_lsm_delete() {
         let mut engine = LsmEngine::new();
@@ -408,31 +469,34 @@ mod tests {
         assert_eq!(engine.get(1, b"key").unwrap(), None);
     }
 
+    /// 測試交易：begin → put → commit
     #[test]
     fn test_lsm_transaction() {
         let mut engine = LsmEngine::new();
         engine.put(1, b"a", b"1").unwrap();
-        
+
         engine.begin_transaction().unwrap();
         engine.put(1, b"b", b"2").unwrap();
         assert_eq!(engine.get(1, b"b").unwrap(), Some(b"2".to_vec()));
-        
+
         engine.commit_transaction().unwrap();
         assert_eq!(engine.get(1, b"b").unwrap(), Some(b"2".to_vec()));
     }
 
+    /// 測試交易回滾
     #[test]
     fn test_lsm_transaction_rollback() {
         let mut engine = LsmEngine::new();
         engine.put(1, b"a", b"1").unwrap();
-        
+
         engine.begin_transaction().unwrap();
         engine.put(1, b"b", b"2").unwrap();
         engine.rollback_transaction().unwrap();
-        
+
         assert_eq!(engine.get(1, b"b").unwrap(), None);
     }
 
+    /// 測試多 table 不支援
     #[test]
     fn test_lsm_multi_table_unsupported() {
         let mut engine = LsmEngine::new();
@@ -440,35 +504,34 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// 測試磁碟持久化
     #[test]
     fn test_lsm_persistence() {
         let temp_dir = std::env::temp_dir().join("db6_lsm_persist_test");
         let _ = std::fs::remove_dir_all(&temp_dir);
-        
-        // Write data and flush
+
         {
             let mut engine = LsmEngine::open(&temp_dir).unwrap();
             engine.put(1, b"key1", b"value1").unwrap();
             engine.put(1, b"key2", b"value2").unwrap();
             engine.flush().unwrap();
         }
-        
-        // Reopen and verify
+
         {
             let engine = LsmEngine::open(&temp_dir).unwrap();
             assert_eq!(engine.get(1, b"key1").unwrap(), Some(b"value1".to_vec()));
             assert_eq!(engine.get(1, b"key2").unwrap(), Some(b"value2".to_vec()));
         }
-        
+
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
+    /// 測試 WAL 復原：寫入交易資料 → 重新開啟 → 資料應從 WAL 復原
     #[test]
     fn test_lsm_wal_recovery() {
         let temp_dir = std::env::temp_dir().join("db6_lsm_wal_test");
         let _ = std::fs::remove_dir_all(&temp_dir);
-        
-        // Write data with transaction (writes to WAL)
+
         {
             let mut engine = LsmEngine::open(&temp_dir).unwrap();
             engine.begin_transaction().unwrap();
@@ -476,19 +539,18 @@ mod tests {
             engine.put(1, b"key2", b"value2").unwrap();
             engine.commit_transaction().unwrap();
         }
-        
-        // Reopen and verify - WAL should be recovered
+
         {
             let engine = LsmEngine::open(&temp_dir).unwrap();
             assert_eq!(engine.get(1, b"key1").unwrap(), Some(b"value1".to_vec()));
             assert_eq!(engine.get(1, b"key2").unwrap(), Some(b"value2".to_vec()));
         }
-        
+
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
 
-// Capability implementations for LsmEngine
+// LSM 引擎支援的能力：掃描、批次操作、交易
 impl crate::engine::CanScan for LsmEngine {}
 impl crate::engine::CanBatch for LsmEngine {}
 impl crate::engine::CanTransaction for LsmEngine {}

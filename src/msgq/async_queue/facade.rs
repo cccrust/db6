@@ -1,15 +1,21 @@
+//! AsyncMsgq — 非同步佇列工廠入口
+//!
+//! 同時管理多個佇列，提供建立、刪除、列舉的功能。
+
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use super::queue::AsyncQueue;
 use crate::kv::{KvEngine, KvStore};
 
+/// 非同步佇列管理器
 pub struct AsyncMsgq {
     engine: Arc<std::sync::RwLock<KvEngine>>,
     queues: Arc<RwLock<std::collections::HashMap<String, AsyncQueue>>>,
 }
 
 impl AsyncMsgq {
+    /// 建立一個新的佇列管理器
     pub fn new(engine: Arc<std::sync::RwLock<KvEngine>>) -> Self {
         Self {
             engine,
@@ -17,6 +23,7 @@ impl AsyncMsgq {
         }
     }
 
+    /// 取得或建立一個佇列（懶載入）
     pub async fn queue(&self, name: &str) -> AsyncQueue {
         let mut queues = self.queues.write().await;
         if let Some(q) = queues.get(name) {
@@ -28,6 +35,7 @@ impl AsyncMsgq {
         q_clone
     }
 
+    /// 刪除一個佇列並清空其內容
     pub async fn delete_queue(&mut self, name: &str) -> Result<(), String> {
         let mut queues = self.queues.write().await;
         if let Some(mut q) = queues.remove(name) {
@@ -36,6 +44,7 @@ impl AsyncMsgq {
         Ok(())
     }
 
+    /// 列舉所有佇列名稱
     pub async fn list_queues(&self) -> Vec<String> {
         let start = b"queue:";
         let end = b"queue;";

@@ -1,4 +1,20 @@
-//! Message Queue - 基於 KV 的訊息佇列系統
+//! 訊息佇列系統 — 基於 KV 儲存引擎的佇列與發布/訂閱
+//!
+//! 提供同步 (Sync) 與非同步 (Async) 兩種操作模式：
+//!
+//! ## 同步元件
+//! - `SyncQueue`: FIFO 訊息佇列，支援優先級、DLQ、可見性超時
+//! - `SyncPubSub`: 發布/訂閱，支援模式匹配
+//! - `SyncSqlExecutor`: SQL 執行器
+//!
+//! ## 非同步元件 (tokio)
+//! - `AsyncQueue`: 基於 tokio Notify 的非同步佇列
+//! - `AsyncPubSub`: 基於 broadcast channel 的非同步發布/訂閱
+//! - `AsyncSqlExecutor`: 非同步 SQL 執行器，支援並發限制
+//!
+//! ## 共用元件
+//! - `ConcurrencyLimiter`: tokio Semaphore 封裝，限制並發任務數
+//! - `GracefulShutdown`: tokio Notify 封裝，優雅關閉機制
 
 mod common;
 mod error;

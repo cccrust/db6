@@ -1,6 +1,18 @@
-//! Query Module - Fluent Interface
+//! 高階查詢模組 — Fluent Method Chaining API
 //!
-//! 提供 Method Chaining 風格的 API for KV and SQL operations.
+//! 提供類似 jQuery/Linq 風格的 Method Chaining 查詢介面。
+//! 使用者可以串聯方法呼叫來建構查詢，無需直接寫 SQL。
+//!
+//! ## 使用方式
+//!
+//! ```ignore
+//! let mut db = Db::new("memory")?;
+//!
+//! let rows = db.table("users")
+//!     .select(&["name", "email"])
+//!     .filter("age", ">", 18)
+//!     .run()?;
+//! ```
 
 use std::collections::HashMap;
 use std::path::Path;

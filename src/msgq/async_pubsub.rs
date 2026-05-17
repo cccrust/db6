@@ -1,8 +1,11 @@
-//! Async Pub/Sub Implementation using tokio::sync::broadcast
+//! 非同步發布/訂閱實作 — 使用 tokio::sync::broadcast
 //!
-//! This implementation wraps SyncPubSub to persist messages in the database
-//! while preserving tokio's broadcast channels for efficient
-//! real-time message distribution.
+//! 雙層架構：
+//! 1. 內層 SyncPubSub 負責 KV store 持久化
+//! 2. 外層 tokio broadcast 負責即時訊息傳遞
+//!
+//! 這樣既有持久化能力（崩潰後可復原歷史記錄），
+//! 又有 broadcast channel 的即時性。
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,21 +15,28 @@ use tokio::sync::RwLock;
 use crate::msgq::sync_pubsub::{PubSubConfig, SyncPubSub};
 use crate::kv::KvEngine;
 
-// Alias SyncPubSubMessage as AsyncPubSubMessage for seamless compatibility
+// 為無縫相容，將 SyncPubSubMessage 別名為 AsyncPubSubMessage
 pub use crate::msgq::SyncPubSubMessage as AsyncPubSubMessage;
 pub use crate::msgq::sync_pubsub::TopicMatcher;
 
+/// 將 MsgqError 轉換為 String
 fn map_err(e: crate::msgq::MsgqError) -> String {
     e.to_string()
 }
 
-/// Async pattern subscriber
+/// 非同步模式訂閱者
+///
+/// 包含模式字串與相對應的 broadcast 接收器。
 pub struct AsyncPatternSubscriber {
     pub pattern: String,
     pub receiver: broadcast::Receiver<AsyncPubSubMessage>,
 }
 
-/// Async PubSub server
+/// 非同步 Pub/Sub 伺服器
+///
+/// - `inner`: SyncPubSub 負責持久化
+/// - `channels`: broadcast channel 負責即時傳遞
+/// - `config`: Pub/Sub 設定
 pub struct AsyncPubSub {
     inner: Arc<RwLock<SyncPubSub>>,
     channels: Arc<RwLock<HashMap<String, broadcast::Sender<AsyncPubSubMessage>>>>,
@@ -34,6 +44,7 @@ pub struct AsyncPubSub {
 }
 
 impl AsyncPubSub {
+    /// 建立新的非同步 Pub/Sub 伺服器
     pub fn new(engine: Arc<std::sync::RwLock<KvEngine>>) -> Self {
         Self {
             inner: Arc::new(RwLock::new(SyncPubSub::new("default", engine))),

@@ -1,3 +1,11 @@
+//! 非同步佇列設定 — 佇列配置、重試策略、退避演算法
+
+/// 非同步佇列設定
+///
+/// - `max_delivery_count`: 最大傳遞次數（超過進 DLQ）
+/// - `dlq_name`: 死信佇列名稱（None 表示不啟用 DLQ）
+/// - `message_ttl_secs`: 訊息存活時間（秒）
+/// - `priority_enabled`: 是否啟用優先級排序
 #[derive(Debug, Clone)]
 pub struct AsyncQueueConfig {
     pub max_delivery_count: u32,
@@ -17,6 +25,12 @@ impl Default for AsyncQueueConfig {
     }
 }
 
+/// 重試設定
+///
+/// - `max_retries`: 最大重試次數
+/// - `initial_delay_ms`: 初始延遲（毫秒）
+/// - `max_delay_ms`: 最大延遲（毫秒）
+/// - `backoff_multiplier`: 退避倍數（每次延遲乘以此值）
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
     pub max_retries: u32,
@@ -36,6 +50,13 @@ impl Default for RetryConfig {
     }
 }
 
+/// 使用指數退避 (Exponential Backoff) 重試一個非同步操作
+///
+/// 流程：
+/// 1. 執行操作
+/// 2. 如果失敗且未達最大重試次數，等待 delay 毫秒
+/// 3. delay = delay × backoff_multiplier（但不會超過 max_delay_ms）
+/// 4. 重複直到成功或達最大重試次數
 pub async fn with_retry<T, F, E>(
     config: RetryConfig,
     mut operation: F,

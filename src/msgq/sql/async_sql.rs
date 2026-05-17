@@ -1,10 +1,10 @@
-//! Async SQL Executor - 基於 tokio + mini-redis 模式
+//! 非同步 SQL 執行器 — 基於 tokio + mini-redis 模式
 //!
 //! 設計原則：
-//! - 每個 SQL 獨立 task（非 worker pool）
-//! - Semaphore 限制並發數
-//! - Graceful shutdown 支援
-//! - tokio::select! 多任務監聽
+//! - 每個 SQL 獨立 task（非 worker pool），實現真正並發
+//! - Semaphore 限制並發數，防止系統資源耗盡
+//! - 支援 Graceful Shutdown，透過 broadcast channel 通知所有 task
+//! - 使用 tokio::select! 同時監聽 shutdown 訊號與 SQL 執行結果
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -12,20 +12,31 @@ use tokio::sync::{Semaphore, broadcast};
 
 use super::types::{JobResult, ResultStore, SqlJob};
 
+/// 預設並發限制
 const DEFAULT_CONCURRENCY_LIMIT: usize = 100;
 
+/// 非同步 SQL 執行器
+///
+/// 每個 `execute()` 呼叫會 spawn 一個獨立的 tokio task 來執行 SQL。
+/// 使用 Semaphore 控制並發數量，broadcast channel 實現優雅關閉。
 pub struct AsyncSqlExecutor {
+    /// 結果儲存
     results: ResultStore,
+    /// 並發限制信號量
     semaphore: Arc<Semaphore>,
+    /// 並發限制數量（AtomicUsize 提供動態查詢）
     concurrency_limit: Arc<AtomicUsize>,
+    /// 關閉訊號發送端
     shutdown: broadcast::Sender<()>,
 }
 
 impl AsyncSqlExecutor {
+    /// 建立新的非同步 SQL 執行器（使用預設並發限制）
     pub fn new(result_store: ResultStore) -> Self {
         Self::with_concurrency_limit(result_store, DEFAULT_CONCURRENCY_LIMIT)
     }
 
+    /// 建立具有自訂並發限制的非同步 SQL 執行器
     pub fn with_concurrency_limit(result_store: ResultStore, limit: usize) -> Self {
         let (shutdown, _) = broadcast::channel(1);
 
@@ -37,7 +48,13 @@ impl AsyncSqlExecutor {
         }
     }
 
-    /// 執行 SQL - 每個 SQL 立即 spawn 獨立 task（真正並發）
+    /// 執行 SQL — 每個 SQL 立即 spawn 獨立 task（真正並發）
+    ///
+    /// 1. 建立 SqlJob 並取得 job_id
+    /// 2. spawn 一個 tokio task
+    /// 3. 在 task 內部 acquire semaphore（確保 permit 的生命期正確）
+    /// 4. 使用 tokio::select! 同時監聽 shutdown 與 SQL 執行
+    /// 5. 結果儲存至 ResultStore
     pub async fn execute(&self, sql: &str) -> Result<String, String> {
         let job = SqlJob::new(sql.to_string());
         let job_id = job.job_id.clone();
@@ -47,7 +64,7 @@ impl AsyncSqlExecutor {
 
         // Spawn 獨立 task 處理這個 SQL
         tokio::spawn(async move {
-            // 取得並發許可（在 task 內部，這樣 permit 屬於這個 task
+            // 取得並發許可（在 task 內部，這樣 permit 屬於這個 task）
             let permit = semaphore.acquire_owned().await.ok();
 
             // 監聽 shutdown 訊號 + 執行 SQL
@@ -113,17 +130,17 @@ impl AsyncSqlExecutor {
         }
     }
 
-    /// 觸發 graceful shutdown
+    /// 觸發 graceful shutdown（所有等待中的 task 會收到關閉訊號）
     pub fn shutdown(&self) {
         let _ = self.shutdown.send(());
     }
 
-    /// 取得可用並發數
+    /// 取得目前可用的並發許可數
     pub fn available_concurrency(&self) -> usize {
         self.semaphore.available_permits()
     }
 
-    /// 取得並發限制
+    /// 取得並發限制數
     pub fn concurrency_limit(&self) -> usize {
         self.concurrency_limit.load(Ordering::Relaxed)
     }
@@ -140,6 +157,10 @@ impl Clone for AsyncSqlExecutor {
     }
 }
 
+/// 模擬 SQL 執行（尚未整合真實的 SQL executor）
+///
+/// 根據 SQL 前綴（SELECT/INSERT/UPDATE/DELETE/CREATE/DROP）
+/// 回傳對應的模擬結果。
 async fn execute_sql(sql: &str) -> JobResult {
     // TODO: 整合現有的 SQL executor
     // 目前回傳模擬結果
