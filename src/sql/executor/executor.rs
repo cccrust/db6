@@ -132,6 +132,90 @@ fn json_path_get(json_str: &str, path: &[String]) -> String {
     String::new()
 }
 
+fn get_table_name_from_from_item(from: &crate::sql::parser::ast::FromItem) -> String {
+    match from {
+        crate::sql::parser::ast::FromItem::Table(table_ref) => table_ref.name.clone(),
+        crate::sql::parser::ast::FromItem::Subquery { alias, .. } => alias.clone(),
+    }
+}
+
+fn get_table_prefix(table_name: &str) -> Vec<u8> {
+    format!("{}:", table_name).into_bytes()
+}
+
+fn eval_join_condition(
+    expr: &crate::sql::parser::ast::Expr,
+    left_key: &[u8],
+    left_val: &[u8],
+    right_key: &[u8],
+    right_val: &[u8],
+) -> bool {
+    use crate::sql::parser::ast::{BinOp, Expr};
+
+    match expr {
+        Expr::BinOp { left, op, right } => {
+            match op {
+                BinOp::And => {
+                    eval_join_condition(left, left_key, left_val, right_key, right_val)
+                        && eval_join_condition(right, left_key, left_val, right_key, right_val)
+                }
+                BinOp::Or => {
+                    eval_join_condition(left, left_key, left_val, right_key, right_val)
+                        || eval_join_condition(right, left_key, left_val, right_key, right_val)
+                }
+                _ => {
+                    let left_val_str = String::from_utf8_lossy(left_val);
+                    let right_val_str = String::from_utf8_lossy(right_val);
+
+                    let left_str = match left.as_ref() {
+                        Expr::Column { table: _, name } => {
+                            if name == "key" {
+                                String::from_utf8_lossy(left_key).to_string()
+                            } else {
+                                json_path_get(&left_val_str, &[name.clone()])
+                            }
+                        }
+                        Expr::JsonPath { path, .. } => json_path_get(&left_val_str, path),
+                        _ => return false,
+                    };
+
+                    let right_str = match right.as_ref() {
+                        Expr::Column { table: _, name } => {
+                            if name == "key" {
+                                String::from_utf8_lossy(right_key).to_string()
+                            } else {
+                                json_path_get(&right_val_str, &[name.clone()])
+                            }
+                        }
+                        Expr::JsonPath { path, .. } => json_path_get(&right_val_str, path),
+                        _ => return false,
+                    };
+
+                    match op {
+                        BinOp::Eq => left_str == right_str,
+                        BinOp::NotEq => left_str != right_str,
+                        BinOp::Lt => left_str < right_str,
+                        BinOp::LtEq => left_str <= right_str,
+                        BinOp::Gt => left_str > right_str,
+                        BinOp::GtEq => left_str >= right_str,
+                        _ => false,
+                    }
+                }
+            }
+        }
+        _ => false,
+    }
+}
+
+fn merge_rows(left_key: &[u8], left_val: &[u8], right_key: &[u8], right_val: &[u8], columns: &[crate::sql::parser::ast::SelectItem]) -> Vec<String> {
+    vec![
+        String::from_utf8_lossy(left_key).to_string(),
+        String::from_utf8_lossy(left_val).to_string(),
+        String::from_utf8_lossy(right_key).to_string(),
+        String::from_utf8_lossy(right_val).to_string(),
+    ]
+}
+
 static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
 
 #[derive(Debug, Clone, Default)]
@@ -186,14 +270,82 @@ impl Executor {
     }
 
     fn execute_select(&mut self, select: &crate::sql::parser::ast::SelectStmt) -> Result<ResultSet> {
-        let _table = select.from.as_ref().ok_or_else(|| Error::Sql("No table specified".into()))?;
+        let from_item = select.from.as_ref().ok_or_else(|| Error::Sql("No table specified".into()))?;
+        let main_table = get_table_name_from_from_item(from_item);
 
-        let start = b"".to_vec();
-        let end = b"".to_vec();
+        let (start, end) = if select.joins.is_empty() {
+            (b"".to_vec(), b"".to_vec())
+        } else {
+            let prefix = get_table_prefix(&main_table);
+            let end = format!("{};", main_table);
+            (prefix, end.into_bytes())
+        };
         let mut rows = self.engine.scan(1, &start, &end)?;
 
         if let Some(ref where_expr) = select.where_ {
             rows.retain(|(k, v)| eval_expr(where_expr, v));
+        }
+
+        for join in &select.joins {
+            let right_table = &join.table.name;
+            let right_prefix = get_table_prefix(right_table);
+            let right_rows: Vec<(Vec<u8>, Vec<u8>)> = self.engine.scan(1, &right_prefix, &format!("{}:", right_table).into_bytes())?;
+
+            let condition_expr = match &join.condition {
+                crate::sql::parser::ast::JoinCondition::On(expr) => Some(expr.clone()),
+                _ => None,
+            };
+
+            let kind = &join.kind;
+            let mut new_rows = Vec::new();
+
+            match kind {
+                crate::sql::parser::ast::JoinKind::Inner => {
+                    for (lk, lv) in &rows {
+                        for (rk, rv) in &right_rows {
+                            if let Some(ref expr) = condition_expr {
+                                if eval_join_condition(expr, lk, lv, rk, rv) {
+                                    new_rows.push((
+                                        lk.clone(),
+                                        lv.clone(),
+                                        rk.clone(),
+                                        rv.clone(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    rows = new_rows.into_iter().map(|(lk, lv, _, _)| (lk, lv)).collect();
+                }
+                crate::sql::parser::ast::JoinKind::Left => {
+                    let mut left_matched: Vec<bool> = vec![false; rows.len()];
+                    for (li, (lk, lv)) in rows.iter().enumerate() {
+                        let mut found = false;
+                        for (rk, rv) in &right_rows {
+                            if let Some(ref expr) = condition_expr {
+                                if eval_join_condition(expr, lk, lv, rk, rv) {
+                                    new_rows.push((lk.clone(), lv.clone(), rk.clone(), rv.clone()));
+                                    found = true;
+                                    left_matched[li] = true;
+                                }
+                            }
+                        }
+                        if !found {
+                            new_rows.push((lk.clone(), lv.clone(), vec![], vec![]));
+                        }
+                    }
+                    rows = new_rows.into_iter().map(|(lk, lv, rk, rv)| {
+                        if rk.is_empty() {
+                            (lk, format!("{{}}").into_bytes())
+                        } else {
+                            (lk, rv)
+                        }
+                    }).collect();
+                }
+                _ => {
+                    return Err(Error::Sql(format!("JOIN kind {:?} not supported", kind)));
+                }
+            }
         }
 
         if !select.group_by.is_empty() {

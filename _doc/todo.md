@@ -13,7 +13,7 @@
 - [ ] 批次操作優化
 
 ### v3.9 - 索引加速
-- [ ] create_index / drop_index
+- [x] create_index / drop_index
 - [ ] 索引掃描
 
 ### v3.10 - 資料庫管理
@@ -36,6 +36,10 @@
 ---
 
 ## SQL 適用功能（BTree / 需要復雜查詢規劃）
+
+這些適合 SQL 的功能只要針對 BTree 版本（LSM tree 和 Hash 不用支援  JOIN ORDER BY）
+
+如果有錯很難解決，你嘗試幾次卻無法解決，不用硬做，直接留著錯誤 (test.sh) 告訴我現況，我讓 gemini 來解
 
 ### v3.14 - JOIN 支援
 - [ ] JoinQuery 結構
