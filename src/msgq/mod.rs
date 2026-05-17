@@ -46,7 +46,7 @@ impl Msgq {
     }
 
     pub fn async_queue(&self, name: &str) -> AsyncQueue {
-        AsyncQueue::new(name)
+        AsyncQueue::new(name, self.engine.clone())
     }
 
     pub fn pubsub(&self) -> SyncPubSub {
