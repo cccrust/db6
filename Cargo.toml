@@ -1,8 +1,10 @@
 [package]
 name = "db6"
-version = "4.11.0"
+version = "4.14.0"
 edition = "2021"
 description = "Unified database with pluggable storage engines (Memory/BTree/LSM) (KV + SQL + FTS)"
+license = "MIT"
+repository = "https://github.com/cccrust/db6"
 
 [[bin]]
 name = "db6"
