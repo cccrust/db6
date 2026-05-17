@@ -6,6 +6,132 @@ use crate::sql::parser::parse;
 use super::json_path::eval_expr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+fn apply_group_by(
+    rows: Vec<(Vec<u8>, Vec<u8>)>,
+    group_by: &[crate::sql::parser::ast::Expr],
+    having: &Option<crate::sql::parser::ast::Expr>,
+    columns: &[crate::sql::parser::ast::SelectItem],
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+    use std::collections::HashMap;
+    use crate::sql::parser::ast::Expr;
+    use crate::sql::parser::ast::{BinOp, SelectItem};
+
+    if group_by.is_empty() {
+        return Ok(rows);
+    }
+
+    let mut groups: HashMap<String, Vec<(Vec<u8>, Vec<u8>)>> = HashMap::new();
+
+    for (k, v) in rows {
+        let group_key = match &group_by[0] {
+            Expr::Column { table: _, name } if name == "key" => {
+                String::from_utf8_lossy(&k).to_string()
+            }
+            Expr::Column { table: _, name } if name == "value" => {
+                String::from_utf8_lossy(&v).to_string()
+            }
+            Expr::Column { table: _, name } => {
+                let val = String::from_utf8_lossy(&v);
+                json_path_get(&val, &[name.clone()])
+            }
+            Expr::JsonPath { path, .. } => {
+                let val = String::from_utf8_lossy(&v);
+                json_path_get(&val, path)
+            }
+            _ => String::from_utf8_lossy(&v).to_string(),
+        };
+        groups.entry(group_key).or_insert_with(Vec::new).push((k, v));
+    }
+
+    let mut result: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+
+    for (group_key, group_rows) in groups {
+        let grouped_row = group_key.clone().into_bytes();
+
+        let value = if columns.iter().any(|c| matches!(c, SelectItem::Expr { expr: Expr::Function { name, .. }, .. } if name.eq_ignore_ascii_case("count"))) {
+            group_rows.len().to_string()
+        } else if columns.iter().any(|c| matches!(c, SelectItem::Expr { expr: Expr::Function { name, .. }, .. } if name.eq_ignore_ascii_case("sum"))) {
+            let sum: f64 = group_rows.iter()
+                .filter_map(|(_, v)| String::from_utf8_lossy(v).parse::<f64>().ok())
+                .sum();
+            sum.to_string()
+        } else if columns.iter().any(|c| matches!(c, SelectItem::Expr { expr: Expr::Function { name, .. }, .. } if name.eq_ignore_ascii_case("avg"))) {
+            let sum: f64 = group_rows.iter()
+                .filter_map(|(_, v)| String::from_utf8_lossy(v).parse::<f64>().ok())
+                .sum();
+            let count = group_rows.len() as f64;
+            if count > 0.0 {
+                (sum / count).to_string()
+            } else {
+                "0".to_string()
+            }
+        } else if columns.iter().any(|c| matches!(c, SelectItem::Expr { expr: Expr::Function { name, .. }, .. } if name.eq_ignore_ascii_case("min"))) {
+            group_rows.iter()
+                .filter_map(|(_, v)| String::from_utf8_lossy(v).parse::<f64>().ok())
+                .fold(f64::INFINITY, f64::min)
+                .to_string()
+        } else if columns.iter().any(|c| matches!(c, SelectItem::Expr { expr: Expr::Function { name, .. }, .. } if name.eq_ignore_ascii_case("max"))) {
+            group_rows.iter()
+                .filter_map(|(_, v)| String::from_utf8_lossy(v).parse::<f64>().ok())
+                .fold(f64::NEG_INFINITY, f64::max)
+                .to_string()
+        } else {
+            String::from_utf8_lossy(&group_rows[0].1).to_string()
+        };
+
+        if let Some(ref having_expr) = having {
+            let mut passed = true;
+            if let Expr::BinOp { left, op, right } = having_expr {
+                if let Expr::Function { name: func_name, .. } = left.as_ref() {
+                    let rhs = match right.as_ref() {
+                        Expr::LitInt(n) => *n as f64,
+                        Expr::LitFloat(f) => *f,
+                        _ => 0.0,
+                    };
+                    let agg_value = value.parse::<f64>().unwrap_or(0.0);
+                    passed = match op {
+                        BinOp::Gt => agg_value > rhs,
+                        BinOp::GtEq => agg_value >= rhs,
+                        BinOp::Lt => agg_value < rhs,
+                        BinOp::LtEq => agg_value <= rhs,
+                        BinOp::Eq => (agg_value - rhs).abs() < 1e-9,
+                        BinOp::NotEq => (agg_value - rhs).abs() >= 1e-9,
+                        _ => true,
+                    };
+                }
+            }
+            if !passed {
+                continue;
+            }
+        }
+
+        result.push((grouped_row, value.into_bytes()));
+    }
+
+    Ok(result)
+}
+
+fn json_path_get(json_str: &str, path: &[String]) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
+        let mut current = &v;
+        for key in path {
+            if let Some(next) = current.get(key) {
+                current = next;
+            } else {
+                return String::new();
+            }
+        }
+        return match current {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::Bool(b) => b.to_string(),
+            serde_json::Value::Null => String::new(),
+            _ => current.to_string(),
+        };
+    }
+    String::new()
+}
+
 static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
 
 #[derive(Debug, Clone, Default)]
@@ -68,6 +194,10 @@ impl Executor {
 
         if let Some(ref where_expr) = select.where_ {
             rows.retain(|(k, v)| eval_expr(where_expr, v));
+        }
+
+        if !select.group_by.is_empty() {
+            rows = apply_group_by(rows, &select.group_by, &select.having, &select.columns)?;
         }
 
         let columns = if select.columns.is_empty() {
@@ -315,6 +445,10 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
 
         if let Some(ref where_expr) = select.where_ {
             rows.retain(|(k, v)| eval_expr(where_expr, v));
+        }
+
+        if !select.group_by.is_empty() {
+            rows = apply_group_by(rows, &select.group_by, &select.having, &select.columns)?;
         }
 
         let columns = if select.columns.is_empty() {
