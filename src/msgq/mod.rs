@@ -1,5 +1,6 @@
 //! Message Queue - 基於 KV 的訊息佇列系統
 
+mod common;
 mod error;
 mod message;
 mod sync_queue;
@@ -8,6 +9,7 @@ mod async_queue;
 mod async_pubsub;
 mod sql;
 
+pub use common::{ConcurrencyLimiter, GracefulShutdown, DEFAULT_CONCURRENCY_LIMIT};
 pub use error::{MsgqError, Result};
 pub use message::SyncQueueMessage;
 pub use sync_queue::{SyncQueue, QueueMeta, QueueConfig};
@@ -45,6 +47,8 @@ impl Msgq {
         SyncQueue::new(name, self.engine.clone())
     }
 
+    // Note: To share Tokio Notify events between producers and consumers,
+    // they must clone() the same AsyncQueue instance, or use AsyncMsgq::queue()
     pub fn async_queue(&self, name: &str) -> AsyncQueue {
         AsyncQueue::new(name, self.engine.clone())
     }
