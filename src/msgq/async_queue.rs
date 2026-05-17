@@ -3,7 +3,7 @@
 use bytes::Bytes;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -73,6 +73,130 @@ impl Default for AsyncQueueConfig {
             dlq_name: None,
             message_ttl_secs: None,
             priority_enabled: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RetryConfig {
+    pub max_retries: u32,
+    pub initial_delay_ms: u64,
+    pub max_delay_ms: u64,
+    pub backoff_multiplier: f64,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            initial_delay_ms: 100,
+            max_delay_ms: 5000,
+            backoff_multiplier: 2.0,
+        }
+    }
+}
+
+pub async fn with_retry<T, F, E>(
+    config: RetryConfig,
+    mut operation: F,
+) -> Result<T, E>
+where
+    F: FnMut() -> Result<T, E>,
+{
+    let mut delay = config.initial_delay_ms;
+    let mut attempts = 0;
+
+    loop {
+        match operation() {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                attempts += 1;
+                if attempts >= config.max_retries {
+                    return Err(e);
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                delay = (delay as f64 * config.backoff_multiplier) as u64;
+                delay = delay.min(config.max_delay_ms);
+            }
+        }
+    }
+}
+
+pub struct ExactlyOnceQueue {
+    inner: AsyncQueue,
+    processed_keys: Arc<RwLock<HashSet<String>>>,
+    ttl_secs: u64,
+}
+
+impl ExactlyOnceQueue {
+    pub fn new(queue: AsyncQueue, ttl_secs: u64) -> Self {
+        Self {
+            inner: queue,
+            processed_keys: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            ttl_secs,
+        }
+    }
+
+    pub async fn enqueue_once(
+        &mut self,
+        idempotency_key: String,
+        payload: Vec<u8>,
+    ) -> Result<Option<String>, String> {
+        {
+            let keys = self.processed_keys.read().await;
+            if keys.contains(&idempotency_key) {
+                return Ok(None);
+            }
+        }
+
+        let msg_id = self.inner.enqueue(payload, 30).await?;
+
+        {
+            let mut keys = self.processed_keys.write().await;
+            keys.insert(idempotency_key);
+        }
+
+        Ok(Some(msg_id))
+    }
+
+    pub async fn dequeue(&mut self, wait_secs: u64) -> Result<Option<AsyncQueueMessage>, String> {
+        self.inner.dequeue(wait_secs).await
+    }
+
+    pub async fn ack(&mut self, msg_id: &str) -> Result<(), String> {
+        self.inner.ack(msg_id).await
+    }
+
+    pub async fn nack(&mut self, msg_id: &str) -> Result<(), String> {
+        self.inner.nack(msg_id).await
+    }
+
+    pub async fn cleanup_expired(&mut self) -> Result<usize, String> {
+        let mut keys = self.processed_keys.write().await;
+        let before = keys.len();
+        keys.retain(|k| {
+            if let Ok(ts) = k.split(':').next().unwrap_or("0").parse::<u64>() {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+                ts * 1000 > now - self.ttl_secs * 1000
+            } else {
+                true
+            }
+        });
+        let removed = before - keys.len();
+
+        Ok(removed)
+    }
+}
+
+impl Clone for ExactlyOnceQueue {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            processed_keys: self.processed_keys.clone(),
+            ttl_secs: self.ttl_secs,
         }
     }
 }

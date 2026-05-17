@@ -11,7 +11,7 @@ pub use error::{MsgqError, Result};
 pub use message::SyncQueueMessage;
 pub use sync_queue::{SyncQueue, QueueMeta, QueueConfig};
 pub use sync_pubsub::{SyncPubSub, SyncPubSubMessage, PubSubConfig, TopicMatcher};
-pub use async_queue::{AsyncQueue, AsyncQueueMessage, AsyncMsgq, AsyncQueueConfig, AsyncQueueStream};
+pub use async_queue::{AsyncQueue, AsyncQueueMessage, AsyncMsgq, AsyncQueueConfig, AsyncQueueStream, RetryConfig, with_retry, ExactlyOnceQueue};
 pub use async_pubsub::{AsyncPubSub, AsyncPubSubMessage, AsyncPatternSubscriber};
 
 use crate::kv::{KvEngine, KvStore};
