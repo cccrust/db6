@@ -1,19 +1,19 @@
-//! db6 REPL — 互動式 SQL 命令列介面
+//! db6 REPL — Interactive SQL command-line interface
 //!
-//! 提供類似 SQLite shell 的互動環境，支援引擎切換、SQL 執行、檔案載入等功能。
-//! 使用者在 db6> 提示字元後輸入 SQL 或點指令 (.engine, .help, .quit, .read) 進行操作。
+//! Provides an interactive environment similar to the SQLite shell, supporting engine switching, SQL execution, file loading, and more.
+//! Users enter SQL or dot commands (.engine, .help, .quit, .read) after the db6> prompt.
 
 use db6::Executor;
 use db6::engine::{HashMemoryEngine, BTreeMemoryEngine, BTreeEngine, LsmEngine, StorageEngine};
 use std::io::{self, Write};
 
-/// 依據字串名稱建立對應的儲存引擎實例
+/// Creates a storage engine instance from a string name
 ///
-/// 支援的引擎：
-/// - `"memory"` 或 `"memory-hash"`：HashMemoryEngine，類似 Redis，快速 KV
-/// - `"memory-btree"`：BTreeMemoryEngine，支援 ORDER BY/scan
-/// - `"btree"`：BTreeEngine，磁碟持久化，支援交易
-/// - `"lsm"`：LsmEngine，高寫入吞吐量
+/// Supported engines:
+/// - `"memory"` or `"memory-hash"`: HashMemoryEngine, Redis-like, fast KV
+/// - `"memory-btree"`: BTreeMemoryEngine, supports ORDER BY/scan
+/// - `"btree"`: BTreeEngine, disk-persistent, supports transactions
+/// - `"lsm"`: LsmEngine, high write throughput
 fn create_engine(engine_type: &str) -> Option<Box<dyn StorageEngine>> {
     match engine_type {
         "memory" | "memory-hash" => Some(Box::new(HashMemoryEngine::new())),
@@ -24,7 +24,7 @@ fn create_engine(engine_type: &str) -> Option<Box<dyn StorageEngine>> {
     }
 }
 
-/// REPL 主程式：無窮迴圈讀取使用者輸入
+/// REPL main: infinite loop reading user input
 fn main() {
     // 顯示初始歡迎訊息
     println!("db6 v2.5.0 - Interactive SQL REPL");

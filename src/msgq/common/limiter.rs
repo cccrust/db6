@@ -1,30 +1,30 @@
-//! ConcurrencyLimiter — 基於 tokio Semaphore 的並發限制器
+//! ConcurrencyLimiter — Concurrency limiter based on tokio Semaphore
 //!
-//! 類似 mini-redis 的設計：限制同時執行的非同步任務數量，
-//! 防止系統資源耗盡。每個任務在開始前需 `acquire()` 一個許可，
-//! 結束後許可自動歸還。
+//! Similar to mini-redis design: limits the number of concurrent async tasks
+//! to prevent system resource exhaustion. Each task must `acquire()` a permit
+//! before starting, and the permit is automatically returned when finished.
 //!
-//! 與直接使用 `Arc<Semaphore>` 的差異：
-//! - 使用 `acquire_owned()` 取得許可，許可的生命期不與借用綁定
-//! - 支援動態調整限制數量 `set_limit()`
-//! - 可透過 `available()` 查詢目前可用許可數
+//! Differences from using `Arc<Semaphore>` directly:
+//! - Uses `acquire_owned()` to get permits, permit lifetime is not tied to borrows
+//! - Supports dynamic limit adjustment via `set_limit()`
+//! - Can query available permits via `available()`
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
-/// 並發限制器
+/// Concurrency limiter
 pub struct ConcurrencyLimiter {
-    /// 底層 Semaphore
+    /// Underlying Semaphore
     semaphore: Arc<Semaphore>,
-    /// 限制數量（用於查詢，不影響 Semaphore 實際行為）
+    /// Limit value (for querying, does not affect Semaphore behavior)
     limit: Arc<AtomicUsize>,
 }
 
 impl ConcurrencyLimiter {
-    /// 建立一個新的並發限制器
+    /// Create a new concurrency limiter
     ///
-    /// `limit`: 最大並發任務數
+    /// `limit`: Maximum number of concurrent tasks
     pub fn new(limit: usize) -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(limit)),
@@ -32,39 +32,39 @@ impl ConcurrencyLimiter {
         }
     }
 
-    /// 同 `new()`，另一種命名方式
+    /// Same as `new()`, alternative naming
     pub fn with_limit(limit: usize) -> Self {
         Self::new(limit)
     }
 
-    /// 非同步取得一個許可（可能等待）
+    /// Asynchronously acquire a permit (may wait)
     ///
-    /// 當所有許可都被佔用時會等待，直到有許可被歸還。
-    /// 使用 `acquire_owned()` 確保許可的生命期可跨越非同步邊界。
+    /// Waits when all permits are in use until one is returned.
+    /// Uses `acquire_owned()` so the permit lifetime can cross async boundaries.
     pub async fn acquire(&self) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
         self.semaphore.clone().acquire_owned().await.map_err(|e| e.to_string())
     }
 
-    /// 嘗試取得一個許可（不等待）
+    /// Try to acquire a permit (non-blocking)
     ///
-    /// 如果沒有可用許可，立即回傳 None。
+    /// Returns None immediately if no permits are available.
     pub fn try_acquire(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
         self.semaphore.clone().try_acquire_owned().ok()
     }
 
-    /// 查詢目前可用的許可數量
+    /// Query the current number of available permits
     pub fn available(&self) -> usize {
         self.semaphore.available_permits()
     }
 
-    /// 取得目前設定的並發限制
+    /// Get the currently configured concurrency limit
     pub fn limit(&self) -> usize {
         self.limit.load(Ordering::Relaxed)
     }
 
-    /// 動態調整並發限制
+    /// Dynamically adjust the concurrency limit
     ///
-    /// 注意：此方法只更新記錄值，不影響已建立的 Semaphore。
+    /// Note: This only updates the recorded value, does not affect the existing Semaphore.
     pub fn set_limit(&self, new_limit: usize) {
         self.limit.store(new_limit, Ordering::Relaxed);
     }

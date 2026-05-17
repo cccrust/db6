@@ -1,4 +1,4 @@
-//! Transaction support（移植自 sql6/src/planner/transaction.rs）
+//! Transaction support (ported from sql6/src/planner/transaction.rs)
 
 use crate::error::Result;
 

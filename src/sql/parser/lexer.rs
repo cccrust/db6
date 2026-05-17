@@ -1,134 +1,134 @@
-//! 詞法分析器 (Lexer)：將 SQL 字串切割為 Token 串
+//! Lexer: Tokenizes SQL strings into a token stream
 //!
-//! 詞法分析是 SQL 處理的第一個階段。Lexer 讀取原始 SQL 字串，
-//! 按照 SQL 語言的詞法規則，將其分割為具有意義的最小單元——Token。
+//! Lexical analysis is the first phase of SQL processing. The Lexer reads raw SQL strings
+//! and splits them into meaningful minimal units — tokens — according to SQL lexical rules.
 //!
-//! 例如，`SELECT * FROM users` 會被切割為：
+//! For example, `SELECT * FROM users` is tokenized into:
 //! ```text
 //! [Select, Star, From, Ident("users"), Eof]
 //! ```
 //!
-//! ## 處理方式
+//! ## Approach
 //!
-//! 採用單一字元往前看的實作方式，逐字讀取輸入字串：
-//! - 遇到字母或底線 → 讀取整個識別符/關鍵字
-//! - 遇到數字 → 讀取整個數字（整數或浮點數）
-//! - 遇到單引號 → 讀取字串字面值
-//! - 遇到特殊字元 → 判斷運算子或標點
-//! - 跳過空白與註解
+//! Implements a single-character lookahead approach, reading the input character by character:
+//! - Letter or underscore → read the entire identifier/keyword
+//! - Digit → read the entire number (integer or float)
+//! - Single quote → read a string literal
+//! - Special character → determine operator or punctuation
+//! - Skip whitespace and comments
 //!
-//! ## 支援的 Token 類型
+//! ## Supported Token Types
 //!
-//! - **關鍵字**：SELECT、FROM、WHERE、INSERT、CREATE 等約 80+ 個 SQL 關鍵字
-//! - **識別符**：表名、欄位名（Ident(String)）
-//! - **字面值**：整數 (LitInt)、浮點數 (LitFloat)、字串 (LitStr)、NULL
-//! - **運算子**：=、!=、<、>、<=、>=、+、-、*、/、%、||
-//! - **標點**：(、)、,、;、.
+//! - **Keywords**: SELECT, FROM, WHERE, INSERT, CREATE, and 80+ other SQL keywords
+//! - **Identifiers**: table names, column names (Ident(String))
+//! - **Literals**: integer (LitInt), float (LitFloat), string (LitStr), NULL
+//! - **Operators**: =, !=, <, >, <=, >=, +, -, *, /, %, ||
+//! - **Punctuation**: (, ), ,, ;, .
 
-/// SQL 詞法單元 (Token)
+/// SQL lexical unit (Token)
 ///
-/// 每個 Token 代表 SQL 字串中的一個最小語義單元。
+/// Each Token represents the smallest semantic unit in a SQL string.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    // ── SQL 關鍵字 ──────────────────────────────────────────────────────
-    /// SELECT 查詢關鍵字
+    // ── Keywords ──────────────────────────────────────────────────────
+    /// SELECT query keyword
     Select, From, Where, Insert, Into, Values,
-    /// UPDATE/DELETE 操作關鍵字
+    /// UPDATE/DELETE operation keywords
     Update, Set, Delete,
-    /// CREATE/DROP/ALTER DDL 關鍵字
+    /// CREATE/DROP/ALTER DDL keywords
     Create, Drop, Table,
-    /// 索引相關
+    /// Index-related
     Index, On, Primary, Key,
-    /// 約束條件
+    /// Constraint-related
     Not, Null, Unique,
-    /// 邏輯運算
+    /// Logical operators
     And, Or, Is, In, Like, Between,
-    /// ORDER BY 排序相關
+    /// ORDER BY sorting
     Order, By, Asc, Desc, Limit, Offset,
-    /// JOIN 相關
+    /// JOIN-related
     Join, Inner, Left, Right, Outer, Cross, Natural, Using,
-    /// GROUP BY 聚合相關
+    /// GROUP BY aggregation
     Group, Having, Distinct, All, As,
-    /// 條件判斷
+    /// Conditional
     If, Exists,
-    /// 交易控制
+    /// Transaction control
     Begin, Commit, Rollback, Transaction,
-    /// FTS5 全文搜尋
+    /// FTS5 full-text search
     Virtual, Match,
-    /// CTE 公用表表達式
+    /// CTE (Common Table Expression)
     With, Recursive,
-    /// FOREIGN KEY 外部鍵約束
+    /// FOREIGN KEY constraint
     References,
-    /// 資料型別
+    /// Data types
     KwInteger, KwText, Real, Blob, Boolean,
-    /// 布林字面值
+    /// Boolean literals
     True, False,
-    /// 其他 SQL 功能關鍵字
+    /// Other SQL keywords
     Pragma, Explain, Alter, Rename, To, Add, Column, Do, Of,
     View, Reindex, Analyze, Temp, Conflict, Nothing, Union, Check, Cast, Default, GLOB,
     Trigger, Before, After, Instead, Each, Row, For, When, End, AutoIncrement,
     Attach, Detach, Database, Vacuum, Backup,
 
-    // ── 識別符 ──────────────────────────────────────────────────────────
-    /// 表名、欄位名等識別符（附原始字串）
+    // ── Identifiers ──────────────────────────────────────────────────────────
+    /// Table name, column name, etc. (with original string)
     Ident(String),
 
-    // ── 字面值 ──────────────────────────────────────────────────────────
-    /// 整數字面值
+    // ── Literals ──────────────────────────────────────────────────────────
+    /// Integer literal
     LitInt(i64),
-    /// 浮點數字面值
+    /// Float literal
     LitFloat(f64),
-    /// 字串字面值（單引號包圍）
+    /// String literal (enclosed in single quotes)
     LitStr(String),
-    /// NULL 字面值
+    /// NULL literal
     LitNull,
 
-    // ── 運算子 ──────────────────────────────────────────────────────────
-    /// 等於 =`
+    // ── Operators ──────────────────────────────────────────────────────────
+    /// Equal `=`
     Eq,
-    /// 不等於 `!=` 或 `<>`
+    /// Not equal `!=` or `<>`
     NotEq,
-    /// 小於 `<`
+    /// Less than `<`
     Lt,
-    /// 小於等於 `<=`
+    /// Less than or equal `<=`
     LtEq,
-    /// 大於 `>`
+    /// Greater than `>`
     Gt,
-    /// 大於等於 `>=`
+    /// Greater than or equal `>=`
     GtEq,
-    /// 加號 `+`
+    /// Plus `+`
     Plus,
-    /// 減號 `-`
+    /// Minus `-`
     Minus,
-    /// 星號 `*`（SELECT * 或乘法）
+    /// Star `*` (SELECT * or multiplication)
     Star,
-    /// 除號 `/`
+    /// Slash `/`
     Slash,
-    /// 百分號 `%`（取餘）
+    /// Percent `%` (modulo)
     Percent,
-    /// 字串串接 `||`
+    /// String concatenation `||`
     Concat,
 
-    // ── 標點符號 ────────────────────────────────────────────────────────
-    /// 左括號 `(`
+    // ── Punctuation ────────────────────────────────────────────────────────
+    /// Left parenthesis `(`
     LParen,
-    /// 右括號 `)`
+    /// Right parenthesis `)`
     RParen,
-    /// 逗號 `,`
+    /// Comma `,`
     Comma,
-    /// 分號 `;`
+    /// Semicolon `;`
     Semicolon,
-    /// 點號 `.`
+    /// Dot `.`
     Dot,
 
-    // ── 特殊 Token ──────────────────────────────────────────────────────
-    /// 輸入結尾
+    // ── Special Tokens ──────────────────────────────────────────────────────
+    /// End of input
     Eof,
-    /// JSON Path 前綴 `@`（如 `@.field`）
+    /// JSON Path prefix `@` (e.g. `@.field`)
     At,
 }
 
-// ── 關鍵字對照表 ─────────────────────────────────────────────────────────
+// ── Keyword lookup table ─────────────────────────────────────────────────────────
 
 fn keyword(s: &str) -> Option<Token> {
     match s.to_uppercase().as_str() {
@@ -238,11 +238,11 @@ fn keyword(s: &str) -> Option<Token> {
     }
 }
 
-// ── Lexer 詞法分析器 ────────────────────────────────────────────────────
+// ── Lexer ────────────────────────────────────────────────────
 
-/// 詞法分析器：將 SQL 字串轉換為 Token 串
+/// Lexer: Converts SQL strings into a token stream
 ///
-/// ## 使用方式
+/// ## Usage
 ///
 /// ```
 /// use db6::sql::parser::lexer::Lexer;
@@ -250,19 +250,19 @@ fn keyword(s: &str) -> Option<Token> {
 /// let tokens = lexer.tokenize().unwrap();
 /// ```
 pub struct Lexer {
-    /// 輸入字元陣列（支援中文等多字節字元）
+    /// Input character array (supports multi-byte characters)
     input: Vec<char>,
-    /// 目前讀取位置
+    /// Current read position
     pos:   usize,
 }
 
 impl Lexer {
-    /// 建立一個新的詞法分析器
+    /// Create a new Lexer
     pub fn new(input: &str) -> Self {
         Lexer { input: input.chars().collect(), pos: 0 }
     }
 
-    /// 掃描全部 token，遇到錯誤回傳 Err
+    /// Scan all tokens, return Err on error
     pub fn tokenize(&mut self) -> Result<Vec<Token>, String> {
         let mut tokens = Vec::new();
         loop {
@@ -274,25 +274,25 @@ impl Lexer {
         Ok(tokens)
     }
 
-    /// 預覽目前字元（不消耗位置）
+    /// Peek at the current character (without consuming)
     fn peek(&self) -> Option<char> { self.input.get(self.pos).copied() }
 
-    /// 預覽下一個字元（不消耗位置）
+    /// Peek at the next character (without consuming)
     fn peek2(&self) -> Option<char> { self.input.get(self.pos + 1).copied() }
 
-    /// 讀取目前字元並移動到下一位置
+    /// Read the current character and advance position
     fn advance(&mut self) -> Option<char> {
         let c = self.input.get(self.pos).copied();
         if c.is_some() { self.pos += 1; }
         c
     }
 
-    /// 讀取下一個 Token（核心方法）
+    /// Read the next Token (core method)
     ///
-    /// 先跳過空白與單行註解（-- 開頭到換行），
-    /// 然後根據第一個字元的類型決定如何處理。
+    /// First skips whitespace and single-line comments (-- through newline),
+    /// then decides how to proceed based on the first character type.
     fn next_token(&mut self) -> Result<Token, String> {
-        // 跳過空白與單行註解
+        // Skip whitespace and single-line comments
         loop {
             match self.peek() {
                 Some(c) if c.is_whitespace() => { self.advance(); }
@@ -303,17 +303,17 @@ impl Lexer {
             }
         }
 
-        // 根據字元類型分派處理
+        // Dispatch based on character type
         match self.peek() {
             None => Ok(Token::Eof),
             Some(c) => match c {
-                // 標點符號
+                // Punctuation
                 '(' => { self.advance(); Ok(Token::LParen) }
                 ')' => { self.advance(); Ok(Token::RParen) }
                 ',' => { self.advance(); Ok(Token::Comma) }
                 ';' => { self.advance(); Ok(Token::Semicolon) }
                 '.' => { self.advance(); Ok(Token::Dot) }
-                // 運算子
+                // Operators
                 '+' => { self.advance(); Ok(Token::Plus) }
                 '-' => { self.advance(); Ok(Token::Minus) }
                 '*' => { self.advance(); Ok(Token::Star) }
@@ -321,7 +321,7 @@ impl Lexer {
                 '%' => { self.advance(); Ok(Token::Percent) }
                 '=' => { self.advance(); Ok(Token::Eq) }
                 '@' => { self.advance(); Ok(Token::At) }
-                // 兩字元運算子
+                // Two-character operators
                 '<' => {
                     self.advance();
                     match self.peek() {
@@ -345,30 +345,30 @@ impl Lexer {
                     if self.peek() == Some('|') { self.advance(); Ok(Token::Concat) }
                     else { Err("expected '||'".to_string()) }
                 }
-                // 字串字面值（單引號）
+                // String literal (single quotes)
                 '\'' => self.lex_string(),
-                // 反引號或雙引號識別符
+                // Backtick or double-quote delimited identifier
                 '`' | '"' => self.lex_quoted_ident(),
-                // 數字
+                // Number
                 c if c.is_ascii_digit() => self.lex_number(),
-                // 識別符 / 關鍵字
+                // Identifier / keyword
                 c if c.is_alphabetic() || c == '_' => self.lex_ident(),
                 c => Err(format!("unexpected character '{}'", c)),
             }
         }
     }
 
-    /// 讀取單引號包圍的字串字面值
+    /// Read a string literal enclosed in single quotes
     ///
-    /// SQL 中兩個連續單引號 `''` 表示跳脫的單引號字元。
+    /// In SQL, two consecutive single quotes `''` represent an escaped single quote.
     fn lex_string(&mut self) -> Result<Token, String> {
-        self.advance(); // 跳過開頭的單引號
+        self.advance(); // Skip opening quote
         let mut s = String::new();
         loop {
             match self.advance() {
                 None => return Err("unterminated string".to_string()),
                 Some('\'') => {
-                    // 連續 '' 表示一個跳脫的單引號
+                    // Consecutive '' represents an escaped single quote
                     if self.peek() == Some('\'') { self.advance(); s.push('\''); }
                     else { break; }
                 }
@@ -378,12 +378,12 @@ impl Lexer {
         Ok(Token::LitStr(s))
     }
 
-    /// 讀取反引號或雙引號包圍的識別符
+    /// Read a backtick or double-quote delimited identifier
     ///
-    /// 例如 `` `my table` `` 或 `"column name"`。
+    /// For example `` `my table` `` or `"column name"`.
     fn lex_quoted_ident(&mut self) -> Result<Token, String> {
         let close = if self.peek() == Some('`') { '`' } else { '"' };
-        self.advance(); // 跳過開頭引號
+        self.advance(); // Skip opening quote
         let mut s = String::new();
         loop {
             match self.advance() {
@@ -395,17 +395,17 @@ impl Lexer {
         Ok(Token::Ident(s))
     }
 
-    /// 讀取數字字面值（整數或浮點數）
+    /// Read a numeric literal (integer or float)
     ///
-    /// 如果數字後有 `.` 且 `.` 後還有數字，則為浮點數。
+    /// If the number is followed by `.` and more digits, it is a float.
     fn lex_number(&mut self) -> Result<Token, String> {
         let mut s = String::new();
         while self.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
             s.push(self.advance().unwrap());
         }
-        // 檢查是否為浮點數格式（小數點後接數字）
+        // Check if it's float format (decimal point followed by digits)
         if self.peek() == Some('.') && self.peek2().map(|c| c.is_ascii_digit()).unwrap_or(false) {
-            s.push(self.advance().unwrap()); // 小數點
+            s.push(self.advance().unwrap()); // Decimal point
             while self.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
                 s.push(self.advance().unwrap());
             }
@@ -418,10 +418,10 @@ impl Lexer {
             .map_err(|_| format!("invalid integer: {}", s))
     }
 
-    /// 讀取識別符或關鍵字
+    /// Read an identifier or keyword
     ///
-    /// 以字母或底線開頭，後續可包含字母、數字、底線。
-    /// 讀取完整字串後查詢關鍵字對照表，匹配則回傳關鍵字 Token。
+    /// Starts with a letter or underscore, followed by letters, digits, or underscores.
+    /// After reading the full string, looks up the keyword table; returns a keyword Token if matched.
     fn lex_ident(&mut self) -> Result<Token, String> {
         let mut s = String::new();
         while self.peek().map(|c| c.is_alphanumeric() || c == '_').unwrap_or(false) {
@@ -432,13 +432,13 @@ impl Lexer {
 }
 
 impl Token {
-    /// 判斷 Token 是否為識別符
+    /// Returns true if the Token is an identifier
     pub fn is_ident(&self) -> bool {
         matches!(self, Token::Ident(_))
     }
 }
 
-// ── 測試 ─────────────────────────────────────────────────────────────────
+// ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

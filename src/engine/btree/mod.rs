@@ -1,11 +1,11 @@
-//! 磁碟 BTree 引擎模組
+//! Disk-based BTree engine module
 //!
-//! 實作基於 BTree 結構的持久化儲存引擎，支援交易功能。
+//! Implements a persistent storage engine based on the BTree structure, with transaction support.
 //!
-//! 模組結構：
-//! - `tree.rs`: BTree 資料結構（基於 BTreeMap）
-//! - `storage.rs`: 檔案儲存與分頁管理
-//! - `engine.rs`: StorageEngine trait 實作
+//! Module structure:
+//! - `tree.rs`: BTree data structure (based on BTreeMap)
+//! - `storage.rs`: File storage and page management
+//! - `engine.rs`: StorageEngine trait implementation
 
 mod storage;
 mod tree;

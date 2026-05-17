@@ -1,54 +1,54 @@
-//! 訊息佇列錯誤型別
+//! Message queue error types
 //!
-//! 使用 thiserror crate 定義訊息佇列特有的錯誤 MsgqError。
-//! 與底層 db6 Error 分離，提供更清晰的錯誤語意。
+//! Defines MsgqError, the message queue specific error type using thiserror.
+//! Separated from the underlying db6 Error for clearer error semantics.
 
 use thiserror::Error;
 use crate::error::Error as DbError;
 
-/// 訊息佇列錯誤
+/// Message queue error
 #[derive(Error, Debug)]
 pub enum MsgqError {
-    /// 佇列不存在
+    /// Queue not found
     #[error("Queue not found: {0}")]
     QueueNotFound(String),
 
-    /// 佇列為空
+    /// Queue is empty
     #[error("Queue is empty")]
     QueueEmpty,
 
-    /// 訊息不存在
+    /// Message not found
     #[error("Message not found: {0}")]
     MessageNotFound(String),
 
-    /// 訊息正在處理中
+    /// Message is being processed
     #[error("Message in flight, please wait")]
     MessageInFlight,
 
-    /// 無效的訊息格式
+    /// Invalid message format
     #[error("Invalid message format: {0}")]
     InvalidFormat(String),
 
-    /// 無效的引擎類型
+    /// Invalid engine type
     #[error("Invalid engine type: {0}")]
     InvalidEngine(String),
 
-    /// 無效的操作
+    /// Invalid operation
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
 
-    /// IO 錯誤
+    /// IO error
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// 序列化錯誤
+    /// Serialization error
     #[error("Serialization error: {0}")]
     Serde(#[from] serde_json::Error),
 
-    /// 資料庫錯誤
+    /// Database error
     #[error("Database error: {0}")]
     Db(#[from] DbError),
 }
 
-/// Result 別名
+/// Result alias
 pub type Result<T> = std::result::Result<T, MsgqError>;

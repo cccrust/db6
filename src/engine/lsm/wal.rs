@@ -1,13 +1,13 @@
-//! WAL — 預寫式日誌 (Write-Ahead Log)
+//! WAL — Write-Ahead Log
 //!
-//! WAL 是 LSM-Tree 的可靠性保證機制。根據 ARIES 演算法的原則，
-//! 在資料寫入 MemTable 之前，必須先寫入 WAL。
+//! WAL is the reliability guarantee mechanism for LSM-Tree. Following ARIES algorithm principles,
+//! data must be written to WAL before being written to MemTable.
 //!
-//! 若程式崩潰，重新啟動時可透過 WAL 復原尚未 flush 到 SSTable 的資料。
+//! On crash, data not yet flushed to SSTable can be recovered from WAL on restart.
 //!
-//! ## 日誌格式
+//! ## Log format
 //!
-//! 每筆日誌記錄以 TLV (Type-Length-Value) 格式儲存：
+//! Each log entry is stored in TLV (Type-Length-Value) format:
 //! ```text
 //! [key_len: u32][key: key_len bytes][value_len: u32][value: value_len bytes]
 //! ```
@@ -18,18 +18,18 @@ use std::path::Path;
 
 use crate::error::Result;
 
-/// WAL 結構
+/// WAL structure
 ///
-/// 每個 LSM 引擎實例對應一個 `wal.log` 檔案。
+/// Each LSM engine instance corresponds to one `wal.log` file.
 pub struct Wal {
-    /// WAL 檔案路徑
+    /// WAL file path
     path: std::path::PathBuf,
-    /// 檔案控制代碼
+    /// File handle
     file: File,
 }
 
 impl Wal {
-    /// 建立一個新的 WAL（append 模式）
+    /// Create a new WAL (append mode)
     pub fn create(path: &Path) -> Result<Self> {
         let file = OpenOptions::new()
             .create(true)
@@ -43,7 +43,7 @@ impl Wal {
         })
     }
 
-    /// 開啟一個已存在的 WAL
+    /// Open an existing WAL
     pub fn open(path: &Path) -> Result<Self> {
         let file = OpenOptions::new()
             .create(true)
@@ -57,9 +57,9 @@ impl Wal {
         })
     }
 
-    /// 寫入一筆日誌記錄
+    /// Write a log entry
     ///
-    /// 格式：`[key_len:4bytes][key][value_len:4bytes][value]`
+    /// Format: `[key_len:4bytes][key][value_len:4bytes][value]`
     pub fn write(&self, key: &[u8], value: &[u8]) -> Result<()> {
         let mut file = OpenOptions::new()
             .write(true)
@@ -79,9 +79,9 @@ impl Wal {
         Ok(())
     }
 
-    /// 從 WAL 復原所有未 flush 的資料
+    /// Recover all unflushed data from WAL
     ///
-    /// 讀取 WAL 中所有記錄並回傳為鍵值對列表。
+    /// Read all records from WAL and return as a list of key-value pairs.
     pub fn recover(&self) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let mut file = File::open(&self.path)?;
         let mut results = Vec::new();
@@ -110,7 +110,7 @@ impl Wal {
         Ok(results)
     }
 
-    /// 清空 WAL 內容（資料已 flush 到 SSTable 後呼叫）
+    /// Clear WAL content (called after data has been flushed to SSTable)
     pub fn clear(&self) -> Result<()> {
         let file = OpenOptions::new()
             .write(true)

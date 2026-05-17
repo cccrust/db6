@@ -1,46 +1,46 @@
-//! 全文搜尋模組 (Full-Text Search)
+//! Full-text search module
 //!
-//! 基於 KV 介面的倒排索引實作，可與所有儲存引擎 (Memory/BTree/LSM) 搭配使用。
+//! Inverted index implementation based on the KV interface, compatible with all storage engines (Memory/BTree/LSM).
 //!
-//! ## 特性
+//! ## Features
 //!
-//! - 倒排索引 (Inverted Index)
-//! - 支援 CJK (中日韓) 與英文分詞
-//! - Boolean 查詢 (AND/OR/NOT)
-//! - 前綴匹配 (prefix*)
-//! - BM25 相關性評分
+//! - Inverted Index
+//! - CJK (Chinese/Japanese/Korean) and English tokenization
+//! - Boolean queries (AND/OR/NOT)
+//! - Prefix matching (prefix*)
+//! - BM25 relevance scoring
 //!
-//! ## 內部儲存結構
+//! ## Internal Storage Structure
 //!
-//! 使用 FTS_TABLE_ID = 255 儲存索引資料：
-//! - `term:{term}` → `[doc_id1, doc_id2, ...]`（倒排列表）
-//! - `doc:{doc_id}:{term}` → `count`（詞頻）
-//! - `doc_len:{doc_id}` → `total_terms`（文件長度）
+//! Uses FTS_TABLE_ID = 255 to store index data:
+//! - `term:{term}` → `[doc_id1, doc_id2, ...]` (inverted list)
+//! - `doc:{doc_id}:{term}` → `count` (term frequency)
+//! - `doc_len:{doc_id}` → `total_terms` (document length)
 
 use std::collections::{BTreeMap, BTreeSet};
 use crate::error::Result;
 use crate::engine::StorageEngine;
 
-/// FTS 使用的保留 table_id
+/// Reserved table_id used by FTS
 const FTS_TABLE_ID: u32 = 255;
 
-/// BM25 評分參數：詞頻飽和參數
+/// BM25 scoring parameter: term frequency saturation
 const BM25_K1: f64 = 1.5;
-/// BM25 評分參數：文件長度正規化參數
+/// BM25 scoring parameter: document length normalization
 const BM25_B: f64 = 0.75;
 
-/// 分詞器 (Tokenizer) trait
+/// Tokenizer trait
 ///
-/// 定義文字切割為詞彙的方法。不同的語言需要不同的分詞策略。
+/// Defines how text is split into terms. Different languages require different tokenization strategies.
 pub trait FtsTokenizer: Send + Sync {
-    /// 將文字切割為詞彙列表
+    /// Tokenize text into a list of terms
     fn tokenize(&self, text: &str) -> Vec<String>;
 }
 
-/// CJK 分詞器 — 二元分詞法 (Bigram)
+/// CJK tokenizer — Bigram
 ///
-/// 將連續的兩個中文字元作為一個詞彙。
-/// 例如：`"資料庫"` → `["資料", "料庫"]`
+/// Uses every two consecutive Chinese characters as a term.
+/// Example: `"資料庫"` → `["資料", "料庫"]`
 pub struct CjkTokenizer;
 
 impl CjkTokenizer {
@@ -63,9 +63,9 @@ impl FtsTokenizer for CjkTokenizer {
     }
 }
 
-/// 英文分詞器 — 轉小寫 + 空白分割
+/// English tokenizer — lowercase + whitespace splitting
 ///
-/// 例如：`"Hello World"` → `["hello", "world"]`
+/// Example: `"Hello World"` → `["hello", "world"]`
 pub struct EnglishTokenizer;
 
 impl EnglishTokenizer {
@@ -83,16 +83,16 @@ impl FtsTokenizer for EnglishTokenizer {
     }
 }
 
-/// FTS 索引 — 透過 KV 介面儲存的倒排索引
+/// FTS index — an inverted index stored via the KV interface
 ///
-/// 泛型參數 E 可以是任何實作 StorageEngine 的引擎。
+/// The generic parameter E can be any engine implementing StorageEngine.
 pub struct FtsIndex<E: StorageEngine> {
     engine: E,
     doc_count: u64,
 }
 
 impl<E: StorageEngine> FtsIndex<E> {
-    /// 建立一個新的 FTS 索引
+    /// Create a new FTS index
     pub fn new(engine: E) -> Self {
         Self {
             engine,
@@ -100,13 +100,13 @@ impl<E: StorageEngine> FtsIndex<E> {
         }
     }
 
-    /// 將一份文件的內容插入倒排索引
+    /// Insert a document's content into the inverted index
     ///
-    /// 步驟：
-    /// 1. 使用 CJK 分詞器切割文字
-    /// 2. 儲存原始文件內容 (D:{doc_id})
-    /// 3. 統計每個詞彙的詞頻 (TF)
-    /// 4. 儲存倒排索引項 (T:{term}:{doc_id} = tf)
+    /// Steps:
+    /// 1. Tokenize text using the CJK tokenizer
+    /// 2. Store the raw document content (D:{doc_id})
+    /// 3. Count term frequency (TF) for each term
+    /// 4. Store inverted index entries (T:{term}:{doc_id} = tf)
     pub fn insert(&mut self, doc_id: u64, text: &str) -> Result<()> {
         let tokenizer = CjkTokenizer::new();
         let terms = tokenizer.tokenize(text);
@@ -131,7 +131,7 @@ impl<E: StorageEngine> FtsIndex<E> {
         Ok(())
     }
 
-    /// 基本搜尋：回傳包含所有查詢詞彙的文件 ID 列表
+    /// Basic search: return document IDs containing all query terms
     pub fn search(&self, query: &str) -> Result<Vec<u64>> {
         let tokenizer = CjkTokenizer::new();
         let terms = tokenizer.tokenize(query);
@@ -162,7 +162,7 @@ impl<E: StorageEngine> FtsIndex<E> {
         Ok(results.into_iter().map(|(k, _)| k).collect())
     }
 
-    /// 取得包含指定詞彙的所有文件 ID（輔助方法）
+    /// Get all document IDs containing the specified term (helper method)
     fn get_doc_ids_for_term(&self, term: &str) -> Result<BTreeSet<u64>> {
         let mut doc_ids = BTreeSet::new();
         for doc_id in self.get_all_doc_ids()? {
@@ -173,9 +173,9 @@ impl<E: StorageEngine> FtsIndex<E> {
         Ok(doc_ids)
     }
 
-    /// 前綴搜尋：回傳包含指定前綴的文件 ID 列表
+    /// Prefix search: return document IDs matching the given prefix
     ///
-    /// 透過掃描 `T:{prefix}` 範圍來實現前綴匹配。
+    /// Implements prefix matching by scanning the `T:{prefix}` range.
     pub fn search_prefix(&self, prefix: &str) -> Result<Vec<u64>> {
         let tokenizer = CjkTokenizer::new();
         let terms = tokenizer.tokenize(prefix);
@@ -210,12 +210,12 @@ impl<E: StorageEngine> FtsIndex<E> {
         Ok(results.into_iter().collect())
     }
 
-    /// Boolean 搜尋：支援 AND 與 NOT 語法
+    /// Boolean search: supports AND and NOT syntax
     ///
-    /// 語法：
-    /// - `"a b"` → 包含 a 與 b 的文件（AND）
-    /// - `"a -b"` → 包含 a 但不包含 b 的文件（AND + NOT）
-    /// - `"a !b"` → 同上
+    /// Syntax:
+    /// - `"a b"` → documents containing both a and b (AND)
+    /// - `"a -b"` → documents containing a but not b (AND + NOT)
+    /// - `"a !b"` → same as above
     pub fn search_boolean(&self, query: &str) -> Result<Vec<u64>> {
         let parts: Vec<&str> = query.split_whitespace().collect();
 
@@ -277,11 +277,12 @@ impl<E: StorageEngine> FtsIndex<E> {
         Ok(results.unwrap().into_iter().collect())
     }
 
-    /// BM25 相關性評分搜尋
+    /// BM25 relevance scoring search
     ///
-    /// BM25 (Best Matching 25) 是現代資訊檢索中最廣泛使用的
-    /// 相關性評分函數，考慮詞頻 (TF)、反向文件頻率 (IDF) 與
-    /// 文件長度正規化。
+    /// BM25 (Best Matching 25) is the most widely used
+    /// relevance scoring function in modern information retrieval,
+    /// considering term frequency (TF), inverse document frequency (IDF), and
+    /// document length normalization.
     pub fn search_bm25(&self, query: &str) -> Result<Vec<(u64, f64)>> {
         let tokenizer = CjkTokenizer::new();
         let terms = tokenizer.tokenize(query);
@@ -320,7 +321,7 @@ impl<E: StorageEngine> FtsIndex<E> {
         Ok(sorted)
     }
 
-    /// 取得所有已索引的文件 ID
+    /// Get all indexed document IDs
     fn get_all_doc_ids(&self) -> Result<Vec<u64>> {
         let mut ids = Vec::new();
         if let Ok(results) = self.engine.scan(FTS_TABLE_ID, b"D:", b"D:~\0") {
@@ -337,7 +338,7 @@ impl<E: StorageEngine> FtsIndex<E> {
         Ok(ids)
     }
 
-    /// 取得詞彙的文件頻率 (DF)：包含該詞彙的文件數量
+    /// Get document frequency (DF): number of documents containing the term
     fn get_document_frequency(&self, term: &str) -> Result<u32> {
         let mut count = 0u32;
         for doc_id in self.get_all_doc_ids()? {
@@ -348,7 +349,7 @@ impl<E: StorageEngine> FtsIndex<E> {
         Ok(count)
     }
 
-    /// 取得詞彙在某文件中的詞頻 (TF)
+    /// Get term frequency (TF) for a term in a specific document
     fn get_term_frequency(&self, doc_id: u64, term: &str) -> Result<u32> {
         let term_key = format!("T:{}:{}", term, doc_id);
         if let Ok(Some(data)) = self.engine.get(FTS_TABLE_ID, term_key.as_bytes()) {
@@ -359,7 +360,7 @@ impl<E: StorageEngine> FtsIndex<E> {
         Ok(0)
     }
 
-    /// 取得文件的詞彙總數（用於 BM25 的長度正規化）
+    /// Get total number of terms in a document (used for BM25 length normalization)
     fn get_doc_length(&self, doc_id: u64) -> Result<u32> {
         if let Ok(Some(text)) = self.get_doc(doc_id) {
             let text_str = String::from_utf8_lossy(&text);
@@ -370,7 +371,7 @@ impl<E: StorageEngine> FtsIndex<E> {
         }
     }
 
-    /// 計算所有文件的平均詞彙總數（用於 BM25 的長度正規化）
+    /// Compute the average document length (used for BM25 length normalization)
     fn compute_avg_doc_length(&self) -> Result<f64> {
         if self.doc_count == 0 {
             return Ok(0.0);
@@ -389,26 +390,26 @@ impl<E: StorageEngine> FtsIndex<E> {
         Ok(total_len as f64 / count as f64)
     }
 
-    /// 傳回已索引的文件數量
+    /// Return the number of indexed documents
     pub fn doc_count(&self) -> u64 {
         self.doc_count
     }
 
-    /// 取得原始文件內容
+    /// Get the raw document content
     pub fn get_doc(&self, doc_id: u64) -> Result<Option<Vec<u8>>> {
         let doc_key = format!("D:{}", doc_id);
         self.engine.get(FTS_TABLE_ID, doc_key.as_bytes())
     }
 }
 
-/// FTS 查詢結構
+/// FTS query structure
 pub struct FtsQuery {
     pub terms: Vec<String>,
     pub and: bool,
 }
 
 impl FtsQuery {
-    /// 解析查詢字串為 FTS 查詢結構
+    /// Parse a query string into an FTS query structure
     pub fn parse(query: &str) -> Self {
         let terms: Vec<String> = query
             .split_whitespace()

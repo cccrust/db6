@@ -1,10 +1,11 @@
-//! B+Tree 實作 — 使用 Rust 標準函式庫的 BTreeMap
+//! B+Tree implementation — uses the Rust standard library's BTreeMap
 //!
-//! 這是一個簡化版的 B+Tree 實作，底層使用 `std::collections::BTreeMap`。
-//! 真正的 B+Tree 實作需要自行管理節點分裂、頁面配置等，此版本利用 Rust
-//! 內建的 BTreeMap 完成底層排序與範圍查詢，並透過序列化 (bincode) 實現持久化。
+//! This is a simplified B+Tree implementation that uses `std::collections::BTreeMap` under the hood.
+//! A real B+Tree implementation would need to manage node splitting, page allocation, etc.
+//! This version leverages Rust's built-in BTreeMap for ordering and range queries,
+//! and implements persistence via serialization (bincode).
 //!
-//! 資料儲存在 `btree.dat` 檔案中，整個 BTreeMap 一次序列化寫入。
+//! Data is stored in the `btree.dat` file; the entire BTreeMap is serialized at once.
 
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
@@ -12,17 +13,17 @@ use std::io::{Read, Write};
 use std::path::Path;
 use crate::error::Result;
 
-/// BTree 資料結構
+/// BTree data structure
 ///
-/// - `data`: 核心資料，使用 BTreeMap 保存所有鍵值對（有序）
-/// - `path`: 可選的磁碟路徑，用於持久化
+/// - `data`: Core data, uses BTreeMap to store all key-value pairs (ordered)
+/// - `path`: Optional disk path for persistence
 pub struct BTree {
     data: BTreeMap<Vec<u8>, Vec<u8>>,
     path: Option<std::path::PathBuf>,
 }
 
 impl BTree {
-    /// 建立一個空的記憶體 BTree
+    /// Create an empty in-memory BTree
     pub fn new() -> Self {
         Self {
             data: BTreeMap::new(),
@@ -30,10 +31,10 @@ impl BTree {
         }
     }
 
-    /// 從磁碟載入 BTree
+    /// Load BTree from disk
     ///
-    /// 從 `path/btree.dat` 讀取序列化資料。
-    /// 如果檔案不存在，回傳空 BTree。
+    /// Reads serialized data from `path/btree.dat`.
+    /// Returns an empty BTree if the file does not exist.
     pub fn load(path: &Path) -> Result<Self> {
         let data_path = path.join("btree.dat");
 
@@ -45,7 +46,7 @@ impl BTree {
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
 
-        // 如果反序列化失敗（格式不相容），回傳空 BTree
+        // If deserialization fails (incompatible format), return empty BTree
         let data: BTreeMap<Vec<u8>, Vec<u8>> = match bincode::deserialize(&contents) {
             Ok(d) => d,
             Err(_) => BTreeMap::new(),
@@ -57,7 +58,7 @@ impl BTree {
         })
     }
 
-    /// 將 BTree 序列化寫入磁碟
+    /// Serialize BTree and write to disk
     pub fn save(&self) -> Result<()> {
         if let Some(ref path) = self.path {
             let data_path = path.join("btree.dat");
@@ -76,33 +77,33 @@ impl BTree {
         Ok(())
     }
 
-    /// 設定持久化路徑
+    /// Set the persistence path
     pub fn set_path(&mut self, path: std::path::PathBuf) {
         self.path = Some(path);
     }
 
-    /// 讀取指定鍵的值，O(log n)
+    /// Read the value for a given key, O(log n)
     pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
         self.data.get(key).cloned()
     }
 
-    /// 寫入或更新一筆鍵值
+    /// Insert or update a key-value pair
     pub fn put(&mut self, key: Vec<u8>, value: Vec<u8>) {
         self.data.insert(key, value);
     }
 
-    /// 刪除一筆鍵值，回傳 true 表示原本存在
+    /// Delete a key-value pair, returns true if the key existed
     pub fn delete(&mut self, key: &[u8]) -> bool {
         self.data.remove(key).is_some()
     }
 
-    /// 範圍掃描 [start, end)
+    /// Range scan [start, end)
     ///
-    /// 支援四種邊界組合：
-    /// - 無邊界：掃描全部
-    /// - 僅起始：從 start 開始到結尾
-    /// - 僅結束：從開頭到 end（不含）
-    /// - 兩者：start（含）到 end（不含）
+    /// Supports four boundary combinations:
+    /// - No boundaries: scan all
+    /// - Start only: from start to end
+    /// - End only: from beginning to end (exclusive)
+    /// - Both: start (inclusive) to end (exclusive)
     pub fn scan(&self, start: &[u8], end: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
         let start = if start.is_empty() { None } else { Some(start.to_vec()) };
         let end = if end.is_empty() { None } else { Some(end.to_vec()) };
@@ -115,7 +116,7 @@ impl BTree {
         }
     }
 
-    /// 將資料 flush 到磁碟
+    /// Flush data to disk
     pub fn flush(&mut self) -> Result<()> {
         self.save()
     }

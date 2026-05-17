@@ -1,19 +1,19 @@
 //! JSON Path evaluation utilities
 //!
-//! 提供 SQL WHERE 子句中 JSON Path 表達式的評估功能
+//! Provides evaluation of JSON Path expressions in SQL WHERE clauses
 //!
-//! # 支援的語法
+//! # Supported Syntax
 //!
-//! - `@.field > value` - 比較運算
-//! - `@.field = 'value'` - 字串比較
-//! - `@.field LIKE 'pattern%'` - 模糊匹配
-//! - `@.field IN ('a', 'b')` - 列表成員
-//! - `@.field IS NULL` - 空值判斷
-//! - `AND / OR` - 複合條件
+//! - `@.field > value` - comparison
+//! - `@.field = 'value'` - string comparison
+//! - `@.field LIKE 'pattern%'` - pattern match
+//! - `@.field IN ('a', 'b')` - list membership
+//! - `@.field IS NULL` - null check
+//! - `AND / OR` - compound conditions
 
 use crate::sql::parser::ast::{Expr, JsonPathOpKind};
 
-/// 評估 WHERE 表達式（支援 JSON Path）
+/// Evaluate WHERE expression (supports JSON Path)
 pub fn eval_expr(expr: &Expr, value: &[u8]) -> bool {
     match expr {
         Expr::JsonPath { path, op, negated, value: cmp_value } => {
@@ -42,7 +42,7 @@ pub fn eval_expr(expr: &Expr, value: &[u8]) -> bool {
     }
 }
 
-/// 根據 JSON Path 取得值
+/// Get value from JSON based on JSON Path
 pub fn json_get(json: &serde_json::Value, path: &[String]) -> serde_json::Value {
     let mut current = json.clone();
     for key in path {
@@ -54,7 +54,7 @@ pub fn json_get(json: &serde_json::Value, path: &[String]) -> serde_json::Value 
     current
 }
 
-/// 比較 JSON 值與表達式值
+/// Compare JSON value with expression value
 pub fn json_path_compare(json_val: &serde_json::Value, op: &JsonPathOpKind, cmp: &Expr) -> bool {
     use JsonPathOpKind::*;
     let cmp_prim = match cmp {
@@ -82,7 +82,7 @@ pub fn json_path_compare(json_val: &serde_json::Value, op: &JsonPathOpKind, cmp:
     }
 }
 
-/// 比較兩個 JSON 值的大小
+/// Compare two JSON values
 fn json_cmp(a: &serde_json::Value, b: &serde_json::Value) -> std::cmp::Ordering {
     use serde_json::Value;
     match (a, b) {

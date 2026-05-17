@@ -1,4 +1,4 @@
-//! Query plan nodes（移植自 sql6/src/planner/plan.rs）
+//! Query plan nodes (ported from sql6/src/planner/plan.rs)
 
 use crate::sql::parser::ast::{Expr, SelectStmt};
 

@@ -1,13 +1,13 @@
-//! 非同步訊息佇列子模組
+//! Async message queue submodule
 //!
-//! 經過 v4.11 重構後從單一檔案拆分為多個關注點分離的子模組：
+//! Refactored in v4.11 from a single file into multiple separated concern submodules:
 //!
-//! - `config.rs`: 佇列設定與重試策略
-//! - `queue.rs`: 核心佇列實作 (tokio Notify)
-//! - `metrics.rs`: 監控指標與健康檢查
-//! - `stream.rs`: tokio Stream 介面
-//! - `exactly.rs`: 恰好一次傳遞 (Exactly-Once)
-//! - `facade.rs`: 工廠入口 (AsyncMsgq)
+//! - `config.rs`: Queue config and retry strategy
+//! - `queue.rs`: Core queue implementation (tokio Notify)
+//! - `metrics.rs`: Monitoring metrics and health checks
+//! - `stream.rs`: tokio Stream interface
+//! - `exactly.rs`: Exactly-Once delivery
+//! - `facade.rs`: Factory entry point (AsyncMsgq)
 
 pub mod config;
 pub mod metrics;
@@ -16,7 +16,7 @@ pub mod stream;
 pub mod facade;
 pub mod exactly;
 
-// 為向後相容，將 SyncQueueMessage 別名為 AsyncQueueMessage
+// Alias SyncQueueMessage as AsyncQueueMessage for backward compatibility
 pub use crate::msgq::SyncQueueMessage as AsyncQueueMessage;
 
 pub use config::{AsyncQueueConfig, RetryConfig, with_retry};
@@ -36,7 +36,7 @@ mod tests {
         Arc::new(std::sync::RwLock::new(KvEngine::new("memory").unwrap()))
     }
 
-    /// 測試非同步佇列的基本操作：enqueue → dequeue → ack
+    /// Test basic async queue operations: enqueue → dequeue → ack
     #[tokio::test]
     async fn test_async_queue_basic() {
         let engine = get_engine();
@@ -54,7 +54,7 @@ mod tests {
         assert_eq!(q.length().await.unwrap(), 0);
     }
 
-    /// 測試 Nack（拒絕處理）使訊息重新可見且 delivery_count 增加
+    /// Test Nack makes message visible again with incremented delivery_count
     #[tokio::test]
     async fn test_async_queue_nack() {
         let engine = get_engine();
@@ -71,7 +71,7 @@ mod tests {
         assert_eq!(msg2.delivery_count, 2);
     }
 
-    /// 測試清空佇列
+    /// Test purging the queue
     #[tokio::test]
     async fn test_async_queue_purge() {
         let engine = get_engine();

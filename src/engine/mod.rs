@@ -1,11 +1,11 @@
-//! 儲存引擎抽象層
+//! Storage engine abstraction layer
 //!
-//! 定義兩層介面：
-//! - [`StorageEngine`] — 底層介面，提供 table_id 隔離、flush/sync/transaction 等方法
-//! - [`KvStore`] — SQL 層直接呼叫的精簡介面，executor 使用此介面操作引擎
+//! Defines two interface layers:
+//! - [`StorageEngine`] — Low-level interface providing table_id isolation, flush/sync/transaction, etc.
+//! - [`KvStore`] — Lightweight interface directly invoked by the SQL layer; the executor uses this to operate the engine
 //!
-//! 所有引擎 (Memory/BTree/LSM) 同時實作 `StorageEngine` + `KvStore`。
-//! 引擎可互換，使用者可透過字串名稱動態選擇。
+//! All engines (Memory/BTree/LSM) implement both `StorageEngine` + `KvStore`.
+//! Engines are interchangeable; users can dynamically select one by name.
 
 pub mod memory;
 pub mod btree;
@@ -19,13 +19,13 @@ pub use capability::{CanOrderBy, CanJoin, CanFts, CanTransaction, CanScan, CanBa
 
 use crate::error::Result;
 
-/// 引擎統計資訊，用於監控與除錯
+/// Engine statistics for monitoring and debugging
 ///
-/// - `key_count`: 目前儲存的鍵數量
-/// - `size_bytes`: 估計的儲存大小
-/// - `cache_hit_rate`: 快取命中率（僅部分引擎支援）
-/// - `in_transaction`: 是否在交易中
-/// - `engine`: 引擎類型名稱字串
+/// - `key_count`: Current number of stored keys
+/// - `size_bytes`: Estimated storage size
+/// - `cache_hit_rate`: Cache hit rate (only supported by some engines)
+/// - `in_transaction`: Whether a transaction is active
+/// - `engine`: Engine type name string
 #[derive(Debug, Clone, Default)]
 pub struct EngineStats {
     pub key_count: u64,
@@ -35,106 +35,105 @@ pub struct EngineStats {
     pub engine: &'static str,
 }
 
-/// 底層儲存引擎介面
+/// Low-level storage engine interface
 ///
-/// 定義了所有儲存引擎必須實作的操作，包括：
-/// - 基本 KV 操作 (get/put/delete/scan)
-/// - 批量操作 (batch_put/range_delete)
-/// - 持久化 (flush/sync)
-/// - 交易支援 (begin/commit/rollback)
-/// - 可觀測性 (stats)
+/// Defines the operations that all storage engines must implement, including:
+/// - Basic KV operations (get/put/delete/scan)
+/// - Batch operations (batch_put/range_delete)
+/// - Persistence (flush/sync)
+/// - Transaction support (begin/commit/rollback)
+/// - Observability (stats)
 ///
-/// `table_id` 參數用於多 table 隔離，不同 table 的資料共用同一引擎但互不干擾。
+/// The `table_id` parameter enables multi-table isolation; different tables share the same engine without interference.
 pub trait StorageEngine: Send + Sync {
-    // ── 工廠方法 ────────────────────────────────────────────────────────────
+    // ── Factory methods ────────────────────────────────────────────────────────
 
-    /// 開啟或建立磁碟資料庫（僅 BTree/LSM 實作）
+    /// Open or create a disk-based database (BTree/LSM only)
     fn open(path: &std::path::Path) -> Result<Box<dyn StorageEngine>>
     where
         Self: Sized;
 
-    /// 建立記憶體模式資料庫
+    /// Create an in-memory database
     fn open_memory() -> Box<dyn StorageEngine>
     where
         Self: Sized;
 
-    /// 回傳引擎類型名稱字串
+    /// Return the engine type name string
     fn engine_type(&self) -> &'static str;
 
-    // ── 基本 KV 操作 ────────────────────────────────────────────────────────
+    // ── Basic KV operations ─────────────────────────────────────────────────
 
-    /// 讀取指定 table 中一筆鍵值資料
+    /// Read a key-value entry from the specified table
     fn get(&self, table_id: u32, key: &[u8]) -> Result<Option<Vec<u8>>>;
 
-    /// 寫入或更新指定 table 中一筆鍵值資料
+    /// Write or update a key-value entry in the specified table
     fn put(&mut self, table_id: u32, key: &[u8], value: &[u8]) -> Result<()>;
 
-    /// 刪除指定 table 中一筆鍵值資料（使用 tombstone 標記）
+    /// Delete a key-value entry from the specified table (uses tombstone marker)
     fn delete(&mut self, table_id: u32, key: &[u8]) -> Result<()>;
 
-    /// 範圍掃描 [start, end)，回傳該範圍內所有鍵值對
+    /// Range scan [start, end), return all key-value pairs in the range
     fn scan(&self, table_id: u32, start: &[u8], end: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>>;
 
-    /// 批量寫入多筆鍵值對（效能優化，減少鎖定/日誌開銷）
+    /// Batch write multiple key-value pairs (performance optimization, reduces locking/log overhead)
     fn batch_put(&mut self, table_id: u32, pairs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()>;
 
-    /// 範圍刪除 [start, end)，刪除該範圍內所有鍵
+    /// Range delete [start, end), delete all keys in the range
     fn range_delete(&mut self, table_id: u32, start: &[u8], end: &[u8]) -> Result<()>;
 
-    // ── FTS (Full-Text Search) 注意 ────────────────────────────────────────
-    // FTS 並非透過 StorageEngine 直接操作，而是透過 FtsIndex 物件使用。
-    // 請參考 examples/fts_kv_api.rs 了解使用方式:
+    // ── FTS (Full-Text Search) note ───────────────────────────────────────────
+    // FTS is not accessed through StorageEngine directly but via FtsIndex:
     //   let mut fts = FtsIndex::new(engine);
     //   fts.insert(doc_id, text)?;
     //   let results = fts.search(query)?;
 
-    // ── 持久化操作 ──────────────────────────────────────────────────────────
+    // ── Persistence operations ──────────────────────────────────────────────
 
-    /// 將記憶體中的髒資料寫回磁碟
+    /// Flush dirty data from memory to disk
     fn flush(&mut self) -> Result<()>;
 
-    /// 執行 fsync 確保資料確實落盤（不遺失）
+    /// Execute fsync to ensure data is persisted (no data loss)
     fn sync(&mut self) -> Result<()>;
 
-    // ── 交易支援 ────────────────────────────────────────────────────────────
+    // ── Transaction support ──────────────────────────────────────────────────
 
-    /// 開始一個新交易
+    /// Begin a new transaction
     fn begin_transaction(&mut self) -> Result<()>;
 
-    /// 提交目前交易，使所有修改永久生效
+    /// Commit the current transaction, making all changes permanent
     fn commit_transaction(&mut self) -> Result<()>;
 
-    /// 回滾目前交易，取消所有未提交的修改
+    /// Rollback the current transaction, discarding all uncommitted changes
     fn rollback_transaction(&mut self) -> Result<()>;
 
-    /// 檢查目前是否有活躍交易
+    /// Check whether a transaction is currently active
     fn has_transaction(&self) -> bool;
 
-    // ── 可觀測性 ───────────────────────────────────────────────────────────
+    // ── Observability ────────────────────────────────────────────────────────
 
-    /// 取得引擎目前的統計資訊
+    /// Get current engine statistics
     fn stats(&self) -> EngineStats;
 }
 
-/// SQL 執行器直接使用的 KV 精簡介面
+/// Lightweight KV interface directly used by the SQL executor
 ///
-/// 與 StorageEngine 不同，此 trait 不需要 flush/sync/transaction，
-/// 因為這些操作由 SQL Executor 在更高層次管理。
+/// Unlike StorageEngine, this trait does not require flush/sync/transaction,
+/// as those operations are managed at a higher level by the SQL Executor.
 ///
-/// 所有引擎（Memory/BTree/LSM）都實作 `impl KvStore for XxxEngine`。
+/// All engines (Memory/BTree/LSM) implement `impl KvStore for XxxEngine`.
 pub trait KvStore: Send + Sync {
-    /// 回傳引擎類型名稱（預設為 "unknown"）
+    /// Return the engine type name (defaults to "unknown")
     fn engine_type(&self) -> &'static str { "unknown" }
 
-    /// 寫入一筆鍵值資料
+    /// Write a key-value entry
     fn put(&mut self, table_id: u32, key: &[u8], value: &[u8]) -> Result<()>;
 
-    /// 讀取一筆鍵值資料
+    /// Read a key-value entry
     fn get(&mut self, table_id: u32, key: &[u8]) -> Result<Option<Vec<u8>>>;
 
-    /// 刪除一筆鍵值資料
+    /// Delete a key-value entry
     fn delete(&mut self, table_id: u32, key: &[u8]) -> Result<()>;
 
-    /// 範圍掃描
+    /// Range scan
     fn scan(&self, table_id: u32, start: &[u8], end: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>>;
 }

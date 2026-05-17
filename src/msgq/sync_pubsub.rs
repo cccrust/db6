@@ -1,14 +1,14 @@
-//! 同步發布/訂閱實作
+//! Sync publish/subscribe implementation
 //!
-//! 傳統的 Pub/Sub 模式，支援頻道訂閱、發布、歷史記錄、模式匹配。
-//! 訂閱者透過輪詢方式檢查新訊息（同步版本）。
+//! Traditional Pub/Sub pattern with channel subscribe, publish, history, and pattern matching.
+//! Subscribers poll for new messages (sync version).
 
 use crate::kv::{KvEngine, KvStore};
 use crate::msgq::error::{MsgqError, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
-/// Pub/Sub 訊息
+/// Pub/Sub message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncPubSubMessage {
     pub id: String,
@@ -18,7 +18,7 @@ pub struct SyncPubSubMessage {
 }
 
 impl SyncPubSubMessage {
-    /// 建立新的 Pub/Sub 訊息
+    /// Create a new Pub/Sub message
     pub fn new(channel: &str, payload: Vec<u8>) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -34,24 +34,24 @@ impl SyncPubSubMessage {
         }
     }
 
-    /// 將 payload 解析為 UTF-8 字串
+    /// Parse payload as UTF-8 string
     pub fn payload_str(&self) -> Option<String> {
         String::from_utf8(self.payload.clone()).ok()
     }
 }
 
-/// 頻道訊息列表（用於 KV 儲存）
+/// Channel message list (for KV storage)
 #[derive(Serialize, Deserialize, Default)]
 struct ChannelMessages {
     messages: Vec<SyncPubSubMessage>,
 }
 
-/// Pub/Sub 設定
+/// Pub/Sub configuration
 ///
-/// - `max_history`: 最大歷史記錄數量
-/// - `history_enabled`: 是否啟用歷史記錄
-/// - `pattern_matching`: 是否啟用模式匹配
-/// - `channel_capacity`: 頻道容量
+/// - `max_history`: Maximum history count
+/// - `history_enabled`: Whether history is enabled
+/// - `pattern_matching`: Whether pattern matching is enabled
+/// - `channel_capacity`: Channel capacity
 #[derive(Debug, Clone)]
 pub struct PubSubConfig {
     pub max_history: usize,

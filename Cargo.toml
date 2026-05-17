@@ -1,8 +1,8 @@
 [package]
 name = "db6"
-version = "4.15.1"
+version = "4.16.0"
 edition = "2021"
-description = "Unified database with pluggable storage engines (Memory/BTree/LSM) (KV + SQL + FTS + Msgq) — 統一資料庫系統，支援可插拔儲存引擎（記憶體/BTree/LSM），提供鍵值儲存、SQL、全文搜尋、訊息佇列等功能"
+description = "Unified database with pluggable storage engines (Memory/BTree/LSM) (KV + SQL + FTS + Msgq) "
 license = "MIT"
 repository = "https://github.com/cccrust/db6"
 

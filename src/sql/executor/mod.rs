@@ -1,12 +1,12 @@
-//! SQL 執行器 — 執行查詢計劃並回傳結果集
+//! SQL executor — Executes query plans and returns result sets
 //!
-//! 執行層負責：
-//! - 遍歷 PlanNode 執行計劃樹
-//! - 呼叫 StorageEngine 進行實際資料操作
-//! - JSON 路徑運算（JSON_EXTRACT、JSON_SET 等）
-//! - 交易管理（BEGIN/COMMIT/ROLLBACK）
+//! The execution layer is responsible for:
+//! - Traversing the PlanNode execution plan tree
+//! - Calling StorageEngine for actual data operations
+//! - JSON path operations (JSON_EXTRACT, JSON_SET, etc.)
+//! - Transaction management (BEGIN/COMMIT/ROLLBACK)
 //!
-//! 移植自 sql6，修改點為將 pager 改為 StorageEngine trait。
+//! Ported from sql6, modified to replace pager with StorageEngine trait.
 
 pub mod executor;
 pub mod json_path;

@@ -1,15 +1,15 @@
-//! BTree 儲存引擎實作
+//! BTree storage engine implementation
 //!
-//! 基於 BTree 的磁碟持久化引擎，使用 `RwLock` 保證執行緒安全。
-//! 支援交易功能：交易期間的修改先暫存在 `tx_buffer` 中，
-//! commit 時才一次寫入 BTree 主結構。
+//! Disk-based BTree engine using `RwLock` for thread safety.
+//! Supports transactions: changes during a transaction are buffered in `tx_buffer`,
+//! and only applied to the main BTree on commit.
 //!
-//! 交易機制：
-//! - begin: 設定 in_transaction = true
-//! - put/delete: 修改寫入 tx_buffer（不影響主 BTree）
-//! - get/scan: 先查主 BTree，再用 tx_buffer 覆蓋/刪除
-//! - commit: tx_buffer 內容逐一應用到主 BTree
-//! - rollback: 直接清除 tx_buffer
+//! Transaction mechanism:
+//! - begin: sets in_transaction = true
+//! - put/delete: writes to tx_buffer (does not affect main BTree)
+//! - get/scan: checks main BTree first, then overlays with tx_buffer
+//! - commit: applies tx_buffer contents to main BTree one by one
+//! - rollback: clears tx_buffer directly
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -20,12 +20,12 @@ use crate::error::{Error, Result};
 
 use super::tree::BTree;
 
-/// BTree 引擎
+/// BTree engine
 ///
-/// - `tree`: 主 BTree 資料結構
-/// - `in_transaction`: 是否在交易中
-/// - `tx_buffer`: 交易緩衝區，table_id → { key → Some(value) 或 None(刪除) }
-/// - `path`: 持久化路徑
+/// - `tree`: main BTree data structure
+/// - `in_transaction`: whether in a transaction
+/// - `tx_buffer`: transaction buffer, table_id → { key → Some(value) or None(delete) }
+/// - `path`: persistence path
 pub struct BTreeEngine {
     tree: RwLock<BTree>,
     in_transaction: RwLock<bool>,
@@ -34,7 +34,7 @@ pub struct BTreeEngine {
 }
 
 impl BTreeEngine {
-    /// 建立一個新的記憶體 BTree 引擎
+    /// Create a new in-memory BTree engine
     pub fn new() -> Self {
         BTreeEngine {
             tree: RwLock::new(BTree::new()),
@@ -44,7 +44,7 @@ impl BTreeEngine {
         }
     }
 
-    /// 從磁碟路徑開啟或建立 BTree 引擎
+    /// Open or create a BTree engine from disk path
     pub fn open(path: &Path) -> Result<Self> {
         std::fs::create_dir_all(path)?;
 
@@ -69,7 +69,7 @@ impl Default for BTreeEngine {
     }
 }
 
-// ===== StorageEngine trait 實作 =====
+// ===== StorageEngine trait implementation =====
 
 impl StorageEngine for BTreeEngine {
     fn open(path: &Path) -> Result<Box<dyn StorageEngine>> {
@@ -80,14 +80,10 @@ impl StorageEngine for BTreeEngine {
         Box::new(Self::new())
     }
 
-    /// 回傳引擎類型名稱：`"btree"`
     fn engine_type(&self) -> &'static str {
         "btree"
     }
 
-    /// 讀取一筆資料
-    ///
-    /// 交易中：先查交易緩衝區，找不到再查主 BTree
     fn get(&self, table_id: u32, key: &[u8]) -> Result<Option<Vec<u8>>> {
         if *self.in_transaction.read().unwrap() {
             if let Some(table_buf) = self.tx_buffer.read().unwrap().get(&table_id) {
@@ -99,10 +95,6 @@ impl StorageEngine for BTreeEngine {
         Ok(self.tree.read().unwrap().get(key))
     }
 
-    /// 寫入一筆資料
-    ///
-    /// 交易中：寫入 tx_buffer（不影響主 BTree）
-    /// 非交易：直接寫入主 BTree
     fn put(&mut self, table_id: u32, key: &[u8], value: &[u8]) -> Result<()> {
         if *self.in_transaction.read().unwrap() {
             let mut tx = self.tx_buffer.write().unwrap();
@@ -114,10 +106,6 @@ impl StorageEngine for BTreeEngine {
         Ok(())
     }
 
-    /// 刪除一筆資料
-    ///
-    /// 交易中：在 tx_buffer 中標記為 None
-    /// 非交易：直接從主 BTree 刪除
     fn delete(&mut self, table_id: u32, key: &[u8]) -> Result<()> {
         if *self.in_transaction.read().unwrap() {
             let mut tx = self.tx_buffer.write().unwrap();
@@ -129,9 +117,6 @@ impl StorageEngine for BTreeEngine {
         Ok(())
     }
 
-    /// 範圍掃描
-    ///
-    /// 交易中：先掃描主 BTree，再用 tx_buffer 的修改覆蓋結果
     fn scan(&self, table_id: u32, start: &[u8], end: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let mut results = self.tree.read().unwrap().scan(start, end);
 
@@ -153,7 +138,6 @@ impl StorageEngine for BTreeEngine {
         Ok(results)
     }
 
-    /// 批量寫入
     fn batch_put(&mut self, table_id: u32, pairs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()> {
         if *self.in_transaction.read().unwrap() {
             let mut tx = self.tx_buffer.write().unwrap();
@@ -169,7 +153,6 @@ impl StorageEngine for BTreeEngine {
         Ok(())
     }
 
-    /// 範圍刪除
     fn range_delete(&mut self, table_id: u32, start: &[u8], end: &[u8]) -> Result<()> {
         let keys: Vec<Vec<u8>> = self.tree.read().unwrap().scan(start, end)
             .into_iter()
@@ -190,19 +173,14 @@ impl StorageEngine for BTreeEngine {
         Ok(())
     }
 
-    /// 將 BTree flush 到磁碟
     fn flush(&mut self) -> Result<()> {
         self.tree.write().unwrap().flush()
     }
 
-    /// 同 flush
     fn sync(&mut self) -> Result<()> {
         self.tree.write().unwrap().flush()
     }
 
-    /// 開始交易
-    ///
-    /// 交易不可嵌套：如果在交易中再次 begin 會回傳錯誤。
     fn begin_transaction(&mut self) -> Result<()> {
         if *self.in_transaction.read().unwrap() {
             return Err(Error::Transaction("Transaction already active".into()));
@@ -211,15 +189,11 @@ impl StorageEngine for BTreeEngine {
         Ok(())
     }
 
-    /// 提交交易
-    ///
-    /// 將 tx_buffer 中的所有修改應用到主 BTree，然後 flush。
     fn commit_transaction(&mut self) -> Result<()> {
         if !*self.in_transaction.read().unwrap() {
             return Err(Error::Transaction("No active transaction".into()));
         }
 
-        // 複製所有修改（避免死鎖：先釋放 tx_buffer 的讀鎖）
         let changes: Vec<_> = {
             let tx = self.tx_buffer.read().unwrap();
             let mut result = Vec::new();
@@ -231,7 +205,6 @@ impl StorageEngine for BTreeEngine {
             result
         };
 
-        // 逐一應用到主 BTree
         for (key, value) in changes {
             match value {
                 Some(v) => self.tree.write().unwrap().put(key, v),
@@ -245,9 +218,6 @@ impl StorageEngine for BTreeEngine {
         Ok(())
     }
 
-    /// 回滾交易
-    ///
-    /// 直接清除 tx_buffer，不影響主 BTree。
     fn rollback_transaction(&mut self) -> Result<()> {
         if !*self.in_transaction.read().unwrap() {
             return Err(Error::Transaction("No active transaction".into()));
@@ -257,12 +227,10 @@ impl StorageEngine for BTreeEngine {
         Ok(())
     }
 
-    /// 是否有活躍交易
     fn has_transaction(&self) -> bool {
         *self.in_transaction.read().unwrap()
     }
 
-    /// 取得統計資訊
     fn stats(&self) -> EngineStats {
         EngineStats {
             key_count: 0,
@@ -274,13 +242,12 @@ impl StorageEngine for BTreeEngine {
     }
 }
 
-// ===== 單元測試 =====
+// ===== Unit tests =====
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// 測試基本的 put/get 操作
     #[test]
     fn test_btree_basic() {
         let mut engine = BTreeEngine::new();
@@ -289,7 +256,6 @@ mod tests {
         assert_eq!(engine.get(1, b"missing").unwrap(), None);
     }
 
-    /// 測試範圍掃描
     #[test]
     fn test_btree_scan() {
         let mut engine = BTreeEngine::new();
@@ -301,7 +267,6 @@ mod tests {
         assert!(results.len() >= 2);
     }
 
-    /// 測試刪除操作
     #[test]
     fn test_btree_delete() {
         let mut engine = BTreeEngine::new();
@@ -310,7 +275,6 @@ mod tests {
         assert_eq!(engine.get(1, b"key").unwrap(), None);
     }
 
-    /// 測試交易：begin → put → commit → 資料持久化
     #[test]
     fn test_btree_transaction() {
         let mut engine = BTreeEngine::new();
@@ -324,7 +288,6 @@ mod tests {
         assert_eq!(engine.get(1, b"b").unwrap(), Some(b"2".to_vec()));
     }
 
-    /// 測試交易回滾：begin → put → rollback → 資料不被寫入
     #[test]
     fn test_btree_transaction_rollback() {
         let mut engine = BTreeEngine::new();
@@ -337,14 +300,13 @@ mod tests {
         assert_eq!(engine.get(1, b"b").unwrap(), None);
     }
 
-    /// 測試磁碟持久化
     #[test]
     fn test_btree_persistence() {
         let temp_dir = std::env::temp_dir().join("db6_btree_persist_test");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        // 階段一：寫入資料並 flush
+        // Phase 1: write and flush
         {
             let mut engine = BTreeEngine::open(Path::new(&temp_dir)).unwrap();
             engine.put(1, b"key1", b"value1").unwrap();
@@ -352,7 +314,7 @@ mod tests {
             engine.flush().unwrap();
         }
 
-        // 階段二：重新開啟並驗證資料仍在
+        // Phase 2: reopen and verify
         {
             let engine = BTreeEngine::open(Path::new(&temp_dir)).unwrap();
             assert_eq!(engine.get(1, b"key1").unwrap(), Some(b"value1".to_vec()));
@@ -363,13 +325,13 @@ mod tests {
     }
 }
 
-// BTree 引擎支援的能力：
-// - CanOrderBy: BTree 有序，支援 ORDER BY
-// - CanScan: 支援範圍掃描
-// - CanBatch: 支援批量操作
-// - CanFts: 支援全文搜尋
-// - CanTransaction: 支援交易
-// - CanGroupBy: 支援分組聚合
+// BTree engine capabilities:
+// - CanOrderBy: BTree is ordered, supports ORDER BY
+// - CanScan: supports range scan
+// - CanBatch: supports batch operations
+// - CanFts: supports full-text search
+// - CanTransaction: supports transactions
+// - CanGroupBy: supports GROUP BY aggregation
 impl crate::engine::CanOrderBy for BTreeEngine {}
 impl crate::engine::CanScan for BTreeEngine {}
 impl crate::engine::CanBatch for BTreeEngine {}

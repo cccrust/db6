@@ -1,39 +1,39 @@
-//! GracefulShutdown — 基於 tokio broadcast 的優雅關閉機制
+//! GracefulShutdown — Graceful shutdown mechanism based on tokio broadcast
 //!
-//! 類似 mini-redis 的設計：協調多個非同步任務的關閉時機。
-//! 當收到關閉訊號時，所有 subscribe 的任務都會收到通知。
+//! Similar to mini-redis design: coordinates shutdown timing for multiple async tasks.
+//! When a shutdown signal is sent, all subscribed tasks receive the notification.
 
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-/// 優雅關閉協調器
+/// Graceful shutdown coordinator
 pub struct GracefulShutdown {
-    /// broadcast channel 的發送端
+    /// broadcast channel sender
     shutdown_tx: broadcast::Sender<()>,
 }
 
 impl GracefulShutdown {
-    /// 建立一個新的關閉協調器
+    /// Create a new shutdown coordinator
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(1);
         Self { shutdown_tx: tx }
     }
 
-    /// 訂閱關閉訊號
+    /// Subscribe to the shutdown signal
     ///
-    /// 每個執行緒/任務需要各自的 Receiver。
+    /// Each thread/task needs its own Receiver.
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
         self.shutdown_tx.subscribe()
     }
 
-    /// 觸發關閉：發送訊號給所有訂閱者
+    /// Trigger shutdown: send signal to all subscribers
     pub fn shutdown(&self) {
         let _ = self.shutdown_tx.send(());
     }
 
-    /// 檢查是否已收到關閉訊號
+    /// Check if shutdown signal has been received
     ///
-    /// 注意：此方法目前回傳 false（需要額外狀態追蹤）。
+    /// Note: This method currently returns false (needs additional state tracking).
     pub fn is_shutdown(&self) -> bool {
         false
     }
@@ -57,7 +57,7 @@ impl Clone for GracefulShutdown {
 mod tests {
     use super::*;
 
-    /// 測試關閉訊號的發送與接收
+    /// Test shutdown signal send and receive
     #[tokio::test]
     async fn test_shutdown_signal() {
         let gs = GracefulShutdown::new();
@@ -71,7 +71,7 @@ mod tests {
         rx2.recv().await.unwrap();
     }
 
-    /// 測試多個訂閱者同時接收關閉訊號
+    /// Test multiple subscribers receiving shutdown signal simultaneously
     #[tokio::test]
     async fn test_multiple_subscribers() {
         let gs = GracefulShutdown::new();

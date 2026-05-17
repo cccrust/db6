@@ -1,7 +1,7 @@
-//! Query planner（移植自 sql6/src/planner/planner.rs）
+//! Query planner (ported from sql6/src/planner/planner.rs)
 //!
-//! 引擎限制：
-//! - LSM: 不支援 JOIN、複雜 ORDER BY、FTS（高 I/O 成本）
+//! Engine limitations:
+//! - LSM: does not support JOIN, complex ORDER BY, or FTS (high I/O cost)
 
 use crate::engine::StorageEngine;
 use crate::error::{Error, Result};
@@ -45,15 +45,15 @@ impl Planner {
     }
 
     fn plan_select(&self, s: &SelectStmt, engine_type: &str) -> Result<Plan> {
-        // 檢查是否有 JOIN
+        // Check for JOIN
         if let Some(ref join) = s.joins.first() {
-            // LSM 引擎限制：不支援 JOIN
+            // LSM engine limitation: JOIN not supported
             if engine_type == "lsm" {
                 return Err(Error::NotSupported(
                     "JOIN not supported with LSM engine".into(),
                 ));
             }
-            // 建立 JOIN plan
+            // Create JOIN plan
             let left_table = match &s.from {
                 Some(FromItem::Table(t)) => t.name.clone(),
                 _ => String::new(),
@@ -91,14 +91,14 @@ impl Planner {
             _ => String::new(),
         };
 
-        // LSM 引擎限制：不支援 ORDER BY（高 I/O 成本）
+        // LSM engine limitation: ORDER BY not supported (high I/O cost)
         if engine_type == "lsm" && !s.order_by.is_empty() {
             return Err(Error::NotSupported(
                 "ORDER BY not supported with LSM engine (high I/O cost)".into(),
             ));
         }
 
-        // LSM 引擎限制：不支援 FTS
+        // LSM engine limitation: FTS not supported
         if engine_type == "lsm" {
             if let Some(ref where_) = s.where_ {
                 if self.contains_fts_match(where_) {

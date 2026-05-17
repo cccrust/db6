@@ -1,13 +1,12 @@
-//! SQL 執行器子模組 — 將 SQL 執行包裝為訊息佇列服務
+//! SQL Executor submodule — wraps SQL execution as a message queue service
 //!
 //! ```text
-//! Client → [SQL Queue] → Worker → Database
-//!                     ↑
-//!                Message Queue (基於 tokio)
+//! Client -> [SQL Queue] -> Worker -> Database
+//!                     ^
+//!                Message Queue (based on tokio)
 //! ```
 //!
-//! 支援同步 (SyncSqlExecutor) 與非同步 (AsyncSqlExecutor) 兩種模式。
-//! 非同步版本支援並發限制 (ConcurrencyLimiter) 與優雅關閉 (GracefulShutdown)。
+//! Supports both synchronous (SyncSqlExecutor) and asynchronous (AsyncSqlExecutor) modes.
 
 mod types;
 mod async_sql;

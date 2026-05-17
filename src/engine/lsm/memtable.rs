@@ -1,33 +1,33 @@
-//! MemTable — LSM-Tree 的記憶體寫入緩衝區
+//! MemTable — LSM-Tree in-memory write buffer
 //!
-//! MemTable (Memory Table) 是 LSM-Tree 的第一層，所有寫入先進入這裡。
-//! 內部使用 `BTreeMap` 確保資料有序，支援範圍掃描。
+//! MemTable (Memory Table) is the first layer of LSM-Tree; all writes enter here first.
+//! Internally uses `BTreeMap` to maintain sorted order and support range scans.
 //!
-//! 當 MemTable 達到一定大小時，會被 flush 到磁碟成為 SSTable。
+//! When the MemTable reaches a certain size, it is flushed to disk as an SSTable.
 //!
-//! ## Value 枚舉
+//! ## Value enum
 //!
-//! - `Data(Vec<u8>)`: 正常資料
-//! - `Tombstone`: 刪除標記（墓碑），表示該鍵已被刪除
+//! - `Data(Vec<u8>)`: normal data
+//! - `Tombstone`: deletion marker indicating the key has been deleted
 
 use std::collections::BTreeMap;
 
-/// 值類型：正常資料或刪除墓碑標記
+/// Value type: normal data or tombstone deletion marker
 #[derive(Clone, Debug)]
 pub enum Value {
-    /// 正常資料
+    /// Normal data
     Data(Vec<u8>),
-    /// 刪除標記（tombstone），表示此鍵已被刪除
+    /// Deletion marker (tombstone) indicating this key has been deleted
     Tombstone,
 }
 
 impl Value {
-    /// 是否為正常資料（非 Tombstone）
+    /// Returns true if this is normal data (not Tombstone)
     pub fn is_data(&self) -> bool {
         matches!(self, Value::Data(_))
     }
 
-    /// 取得資料內容（Tombstone 回傳 None）
+    /// Get the data content (returns None for Tombstone)
     pub fn get_data(&self) -> Option<&Vec<u8>> {
         match self {
             Value::Data(v) => Some(v),
@@ -36,35 +36,35 @@ impl Value {
     }
 }
 
-/// MemTable 結構
+/// MemTable structure
 ///
-/// 使用 `BTreeMap` 儲存有序的鍵值對，鍵為 `Vec<u8>`，值為 `Value`。
+/// Uses `BTreeMap` to store ordered key-value pairs, keys are `Vec<u8>`, values are `Value`.
 pub struct MemTable {
     map: BTreeMap<Vec<u8>, Value>,
 }
 
 impl MemTable {
-    /// 建立一個空的 MemTable
+    /// Create an empty MemTable
     pub fn new() -> Self {
         Self { map: BTreeMap::new() }
     }
 
-    /// 寫入一筆資料（插入或更新）
+    /// Insert or update a key-value pair
     pub fn put(&mut self, key: Vec<u8>, value: Vec<u8>) {
         self.map.insert(key, Value::Data(value));
     }
 
-    /// 刪除一筆資料（插入 Tombstone 標記）
+    /// Delete a key (insert a Tombstone marker)
     pub fn delete(&mut self, key: Vec<u8>) {
         self.map.insert(key, Value::Tombstone);
     }
 
-    /// 讀取一筆資料
+    /// Get a value by key
     pub fn get(&self, key: &[u8]) -> Option<&Value> {
         self.map.get(key)
     }
 
-    /// 範圍掃描 [start, end)，只回傳正常資料（跳過 Tombstone）
+    /// Range scan [start, end), returns only normal data (skips Tombstones)
     pub fn scan(&self, start: &[u8], end: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
         let start = if start.is_empty() { None } else { Some(start.to_vec()) };
         let end = if end.is_empty() { None } else { Some(end.to_vec()) };
@@ -89,12 +89,12 @@ impl MemTable {
         }
     }
 
-    /// 傳回鍵的數量（含 Tombstone）
+    /// Return the number of keys (including Tombstones)
     pub fn len(&self) -> usize {
         self.map.len()
     }
 
-    /// 傳回所有正常資料（用於 flush 到 SSTable）
+    /// Return all normal data (for flushing to SSTable)
     pub fn all_data(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
         self.map.iter()
             .filter(|(_, v)| v.is_data())
@@ -102,7 +102,7 @@ impl MemTable {
             .collect()
     }
 
-    /// 清空 MemTable
+    /// Clear the MemTable
     pub fn clear(&mut self) {
         self.map.clear();
     }

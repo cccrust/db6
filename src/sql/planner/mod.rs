@@ -1,10 +1,10 @@
-//! SQL 規劃器 — 將 AST 轉換為可執行的查詢計劃
+//! SQL planner — Converts AST into executable query plans
 //!
-//! 規劃層負責：
-//! - 語意檢查（表是否存在、欄位是否存在）
-//! - 約束驗證（NOT NULL、UNIQUE、CHECK）
-//! - 查詢最佳化（謂詞下推等）
-//! - 產生 PlanNode 執行計劃
+//! The planning layer is responsible for:
+//! - Semantic checks (table existence, column existence)
+//! - Constraint validation (NOT NULL, UNIQUE, CHECK)
+//! - Query optimization (predicate pushdown, etc.)
+//! - Generating PlanNode execution plans
 
 pub mod plan;
 pub mod planner;

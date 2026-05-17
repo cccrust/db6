@@ -1,65 +1,65 @@
-//! KV API 統一介面 — 工廠模式 + 統一的 KvStore 抽象層
+//! KV API unified interface — factory pattern + unified KvStore abstraction layer
 //!
-//! 提供 `KvEngine` 列舉作為工廠介面，讓使用者可以透過字串名稱
-//! 選擇儲存引擎，而不需要直接與具體的引擎型別打交道。
+//! Provides the `KvEngine` enum as a factory interface, allowing users to select
+//! a storage engine by string name without dealing with concrete engine types directly.
 //!
-//! KvEngine 使用 `Arc<RwLock<...>>` 實現執行緒安全的共享存取。
+//! KvEngine uses `Arc<RwLock<...>>` for thread-safe shared access.
 
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use crate::error::{Error, Result};
 use crate::engine::{EngineStats, StorageEngine};
 
-/// KV Store 統一介面
+/// KV Store unified interface
 ///
-/// 定義了所有 KV 操作的基本方法，與 StorageEngine 不同的是，
-/// 此 trait 直接服務於上層的 SQL 執行器。
+/// Defines all basic KV operations. Unlike StorageEngine,
+/// this trait directly serves the upper SQL executor layer.
 pub trait KvStore {
-    /// 寫入一筆鍵值資料
+    /// Write a key-value pair
     fn put(&mut self, table_id: u32, key: &[u8], value: &[u8]) -> Result<()>;
-    /// 讀取一筆鍵值資料
+    /// Read a key-value pair
     fn get(&self, table_id: u32, key: &[u8]) -> Result<Option<Vec<u8>>>;
-    /// 刪除一筆鍵值資料
+    /// Delete a key-value pair
     fn delete(&mut self, table_id: u32, key: &[u8]) -> Result<()>;
-    /// 範圍掃描 [start, end)
+    /// Range scan [start, end)
     fn scan(&self, table_id: u32, start: &[u8], end: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>>;
-    /// 批量寫入
+    /// Batch write
     fn batch_put(&mut self, table_id: u32, pairs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()>;
-    /// 範圍刪除
+    /// Range delete
     fn range_delete(&mut self, table_id: u32, start: &[u8], end: &[u8]) -> Result<()>;
-    /// 將資料 flush 到磁碟
+    /// Flush data to disk
     fn flush(&mut self) -> Result<()>;
-    /// 取得引擎類型名稱
+    /// Get engine type name
     fn engine_type(&self) -> &'static str;
 }
 
-/// KV Engine 列舉
+/// KV Engine enum
 ///
-/// 封裝了四種不同的儲存引擎實作，透過 `new()` 或 `open()` 工廠方法建立。
+/// Wraps four different storage engine implementations, created via `new()` or `open()` factory methods.
 ///
-/// | 變體 | new() 名稱 | open() 支援 | 特性 |
+/// | Variant | new() Name | open() Support | Features |
 /// |------|-----------|------------|------|
-/// | Hash | "memory"/"hash" | 否 | O(1) 隨機存取 |
-/// | BTreeMem | "btree"/"btree-mem" | 否 | 有序、範圍掃描 |
-/// | BTree | 不直接支援 | "btree" | 磁碟持久化、交易 |
-/// | Lsm | "lsm" | "lsm" | 高寫入吞吐量 |
+/// | Hash | "memory"/"hash" | no | O(1) random access |
+/// | BTreeMem | "btree"/"btree-mem" | no | Ordered, range scan |
+/// | BTree | not directly | "btree" | Disk persistence, transactions |
+/// | Lsm | "lsm" | "lsm" | High write throughput |
 pub enum KvEngine {
-    /// HashMap 記憶體引擎（O(1)，不支援 ORDER BY）
+    /// HashMap memory engine (O(1), does not support ORDER BY)
     Hash(Arc<RwLock<crate::engine::HashMemoryEngine>>),
-    /// BTreeMap 記憶體引擎（O(log n)，支援 ORDER BY）
+    /// BTreeMap memory engine (O(log n), supports ORDER BY)
     BTreeMem(Arc<RwLock<crate::engine::BTreeMemoryEngine>>),
-    /// 磁碟 BTree 引擎（支援交易）
+    /// Disk BTree engine (supports transactions)
     BTree(Arc<RwLock<crate::engine::BTreeEngine>>),
-    /// LSM-Tree 引擎（高寫入吞吐量）
+    /// LSM-Tree engine (high write throughput)
     Lsm(Arc<RwLock<crate::engine::LsmEngine>>),
 }
 
 impl KvEngine {
-    /// 建立記憶體模式引擎
+    /// Create an in-memory engine
     ///
-    /// - `"memory"` 或 `"hash"`: HashMap 引擎
-    /// - `"btree"` 或 `"btree-mem"`: BTreeMap 引擎
-    /// - `"lsm"`: LSM 引擎（純記憶體模式）
+    /// - `"memory"` or `"hash"`: HashMap engine
+    /// - `"btree"` or `"btree-mem"`: BTreeMap engine
+    /// - `"lsm"`: LSM engine (in-memory mode)
     pub fn new(engine_type: &str) -> Result<Self> {
         match engine_type.to_lowercase().as_str() {
             "memory" | "hash" => Ok(KvEngine::Hash(Arc::new(RwLock::new(crate::engine::HashMemoryEngine::new())))),
@@ -69,10 +69,10 @@ impl KvEngine {
         }
     }
 
-    /// 建立磁碟持久化引擎
+    /// Create a persistent (on-disk) engine
     ///
-    /// - `"btree"`: 從路徑開啟 BTree 引擎
-    /// - `"lsm"`: 從路徑開啟 LSM 引擎
+    /// - `"btree"`: Open BTree engine from path
+    /// - `"lsm"`: Open LSM engine from path
     pub fn open(engine_type: &str, path: &Path) -> Result<Self> {
         match engine_type.to_lowercase().as_str() {
             "btree" => Ok(KvEngine::BTree(Arc::new(RwLock::new(crate::engine::BTreeEngine::open(path)?)))),
@@ -269,7 +269,7 @@ impl StorageEngine for KvEngine {
 mod tests {
     use super::*;
 
-    /// 測試透過 KvEngine::new("memory") 建立引擎並操作
+    /// Test creating an engine via KvEngine::new("memory") and performing operations
     #[test]
     fn test_kv_engine_new() {
         let mut kv = KvEngine::new("memory").unwrap();
@@ -277,7 +277,7 @@ mod tests {
         assert_eq!(KvStore::get(&kv, 1, b"key").unwrap(), Some(b"value".to_vec()));
     }
 
-    /// 測試 BTree 記憶體引擎
+    /// Test BTree memory engine
     #[test]
     fn test_kv_engine_btree_mem() {
         let mut kv = KvEngine::new("btree").unwrap();
@@ -285,7 +285,7 @@ mod tests {
         assert_eq!(KvStore::get(&kv, 1, b"key").unwrap(), Some(b"value".to_vec()));
     }
 
-    /// 測試 LSM 引擎
+    /// Test LSM engine
     #[test]
     fn test_kv_engine_lsm() {
         let mut kv = KvEngine::new("lsm").unwrap();
@@ -293,7 +293,7 @@ mod tests {
         assert_eq!(KvStore::get(&kv, 1, b"key").unwrap(), Some(b"value".to_vec()));
     }
 
-    /// 測試磁碟持久化
+    /// Test disk persistence
     #[test]
     fn test_kv_engine_persistence() {
         let temp_dir = std::env::temp_dir().join("db6_kv_test");

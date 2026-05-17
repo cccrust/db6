@@ -1,11 +1,11 @@
-//! 非同步佇列設定 — 佇列配置、重試策略、退避演算法
+//! Async queue configuration — queue config, retry strategy, backoff algorithm
 
-/// 非同步佇列設定
+/// Async queue configuration
 ///
-/// - `max_delivery_count`: 最大傳遞次數（超過進 DLQ）
-/// - `dlq_name`: 死信佇列名稱（None 表示不啟用 DLQ）
-/// - `message_ttl_secs`: 訊息存活時間（秒）
-/// - `priority_enabled`: 是否啟用優先級排序
+/// - `max_delivery_count`: Max delivery count (excess goes to DLQ)
+/// - `dlq_name`: Dead letter queue name (None disables DLQ)
+/// - `message_ttl_secs`: Message time-to-live (seconds)
+/// - `priority_enabled`: Whether priority ordering is enabled
 #[derive(Debug, Clone)]
 pub struct AsyncQueueConfig {
     pub max_delivery_count: u32,
@@ -25,12 +25,12 @@ impl Default for AsyncQueueConfig {
     }
 }
 
-/// 重試設定
+/// Retry configuration
 ///
-/// - `max_retries`: 最大重試次數
-/// - `initial_delay_ms`: 初始延遲（毫秒）
-/// - `max_delay_ms`: 最大延遲（毫秒）
-/// - `backoff_multiplier`: 退避倍數（每次延遲乘以此值）
+/// - `max_retries`: Maximum retry count
+/// - `initial_delay_ms`: Initial delay (milliseconds)
+/// - `max_delay_ms`: Maximum delay (milliseconds)
+/// - `backoff_multiplier`: Backoff multiplier (delay multiplied by this each time)
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
     pub max_retries: u32,
@@ -50,13 +50,13 @@ impl Default for RetryConfig {
     }
 }
 
-/// 使用指數退避 (Exponential Backoff) 重試一個非同步操作
+/// Retry an async operation with exponential backoff
 ///
-/// 流程：
-/// 1. 執行操作
-/// 2. 如果失敗且未達最大重試次數，等待 delay 毫秒
-/// 3. delay = delay × backoff_multiplier（但不會超過 max_delay_ms）
-/// 4. 重複直到成功或達最大重試次數
+/// Process:
+/// 1. Execute the operation
+/// 2. If it fails and max retries not reached, wait delay ms
+/// 3. delay = delay × backoff_multiplier (but capped at max_delay_ms)
+/// 4. Repeat until success or max retries reached
 pub async fn with_retry<T, F, E>(
     config: RetryConfig,
     mut operation: F,

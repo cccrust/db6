@@ -1,7 +1,7 @@
-//! 恰好一次傳遞 (Exactly-Once Queue)
+//! Exactly-Once Queue
 //!
-//! 透過冪等性鍵 (idempotency key) 的去重機制實現恰好一次傳遞語意。
-//! 每個訊息有唯一的冪等性鍵，重複提交相同鍵的訊息會被忽略。
+//! Achieves exactly-once delivery semantics via idempotency key deduplication.
+//! Each message has a unique idempotency key; duplicate submissions with the same key are ignored.
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -10,11 +10,11 @@ use std::collections::HashSet;
 use super::queue::AsyncQueue;
 use crate::msgq::SyncQueueMessage as AsyncQueueMessage;
 
-/// 恰好一次傳遞佇列
+/// Exactly-Once queue
 ///
-/// - `inner`: 底層 AsyncQueue
-/// - `processed_keys`: 已處理的冪等性鍵集合
-/// - `ttl_secs`: 鍵的存活時間（防止記憶體無限增長）
+/// - `inner`: Underlying AsyncQueue
+/// - `processed_keys`: Set of already-processed idempotency keys
+/// - `ttl_secs`: Key time-to-live (prevents unbounded memory growth)
 pub struct ExactlyOnceQueue {
     inner: AsyncQueue,
     processed_keys: Arc<RwLock<HashSet<String>>>,
@@ -22,7 +22,7 @@ pub struct ExactlyOnceQueue {
 }
 
 impl ExactlyOnceQueue {
-    /// 建立一個新的 Exactly-Once 佇列
+    /// Create a new Exactly-Once queue
     pub fn new(queue: AsyncQueue, ttl_secs: u64) -> Self {
         Self {
             inner: queue,

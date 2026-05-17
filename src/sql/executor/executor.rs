@@ -1,4 +1,4 @@
-//! Query executor - Basic SQL on KV stores
+//! Query executor — runs SQL queries against KV stores
 
 use crate::engine::StorageEngine;
 use crate::error::{Error, Result};

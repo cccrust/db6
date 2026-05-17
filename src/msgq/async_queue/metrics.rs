@@ -1,17 +1,17 @@
-//! 佇列監控指標與健康檢查
+//! Queue monitoring metrics and health checks
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-/// 佇列監控指標
+/// Queue monitoring metrics
 ///
-/// 所有指標使用 AtomicU64 確保執行緒安全。
-/// - `enqueued_total`: 累計入隊總數
-/// - `dequeued_total`: 累計出隊總數
-/// - `acked_total`: 累計確認總數
-/// - `nacked_total`: 累計拒絕總數
-/// - `in_flight`: 正在處理中的訊息數
-/// - `queue_depth`: 佇列深度
+/// All metrics use AtomicU64 for thread safety.
+/// - `enqueued_total`: Cumulative enqueue count
+/// - `dequeued_total`: Cumulative dequeue count
+/// - `acked_total`: Cumulative ack count
+/// - `nacked_total`: Cumulative nack count
+/// - `in_flight`: Number of messages being processed
+/// - `queue_depth`: Queue depth
 #[derive(Debug, Clone)]
 pub struct QueueMetrics {
     pub enqueued_total: Arc<AtomicU64>,
@@ -23,7 +23,7 @@ pub struct QueueMetrics {
 }
 
 impl QueueMetrics {
-    /// 建立新的指標實例
+    /// Create a new metrics instance
     pub fn new() -> Self {
         Self {
             enqueued_total: Arc::new(AtomicU64::new(0)),
@@ -35,32 +35,32 @@ impl QueueMetrics {
         }
     }
 
-    /// 入隊計數 +1
+    /// Increment enqueue count
     pub fn enqueued_inc(&self) {
         self.enqueued_total.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// 出隊計數 +1
+    /// Increment dequeue count
     pub fn dequeued_inc(&self) {
         self.dequeued_total.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// 確認計數 +1
+    /// Increment ack count
     pub fn acked_inc(&self) {
         self.acked_total.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// 拒絕計數 +1
+    /// Increment nack count
     pub fn nacked_inc(&self) {
         self.nacked_total.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// 設定飛行中訊息數
+    /// Set in-flight message count
     pub fn in_flight_set(&self, count: u64) {
         self.in_flight.store(count, Ordering::Relaxed);
     }
 
-    /// 設定佇列深度
+    /// Set queue depth
     pub fn queue_depth_set(&self, depth: u64) {
         self.queue_depth.store(depth, Ordering::Relaxed);
     }
@@ -72,7 +72,7 @@ impl Default for QueueMetrics {
     }
 }
 
-/// 健康狀態列舉
+/// Health status enum
 #[derive(Debug, Clone)]
 pub enum HealthStatus {
     Healthy,

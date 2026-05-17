@@ -1,9 +1,9 @@
-//! SQL 解析器 — 詞法分析 (Lexer) → 語法分析 (Parser) → 抽象語法樹 (AST)
+//! SQL parser — Lexer → Parser → Abstract Syntax Tree (AST)
 //!
-//! 包含三個子模組：
-//! - `lexer`: 將 SQL 字串切割為 Token 串
-//! - `ast`: 定義 SQL 語句的抽象語法樹節點
-//! - `parser`: 使用遞迴下降法將 Token 串解析為 AST
+//! Contains three submodules:
+//! - `lexer`: Tokenizes SQL strings into a token stream
+//! - `ast`: Defines AST nodes for SQL statements
+//! - `parser`: Uses recursive descent to parse the token stream into an AST
 
 pub mod lexer;
 pub mod ast;

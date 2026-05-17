@@ -1,8 +1,8 @@
-//! 非同步佇列核心實作
+//! Async queue core implementation
 //!
-//! AsyncQueue 封裝 SyncQueue 並透過 tokio::sync::Notify 提供即時通知。
-//! 當有新訊息入隊時，Notify 喚醒等待 dequeue 的消費者，
-//! 避免 busy-wait polling。
+//! AsyncQueue wraps SyncQueue and provides real-time notification via tokio::sync::Notify.
+//! When a new message is enqueued, Notify wakes waiting consumers
+//! to avoid busy-wait polling.
 
 use std::sync::Arc;
 use tokio::sync::{RwLock, Notify};
@@ -11,23 +11,23 @@ use super::config::AsyncQueueConfig;
 use crate::msgq::{SyncQueue, SyncQueueMessage, QueueConfig};
 use crate::kv::KvEngine;
 
-/// 將 MsgqError 轉換為 String
+/// Convert MsgqError to String
 fn map_err(e: crate::msgq::MsgqError) -> String {
     e.to_string()
 }
 
-/// 非同步訊息佇列
+/// Async message queue
 ///
-/// 包裝同步 SyncQueue 並加入非同步通知機制。
+/// Wraps the sync SyncQueue with async notification.
 pub struct AsyncQueue {
-    /// 內部同步佇列（使用 tokio RwLock 以支援非同步）
+    /// Inner sync queue (uses tokio RwLock for async support)
     inner: Arc<RwLock<SyncQueue>>,
-    /// 通知消費者有新訊息
+    /// Notifies consumers of new messages
     notify: Arc<Notify>,
 }
 
 impl AsyncQueue {
-    /// 建立一個新的非同步佇列
+    /// Create a new async queue
     pub fn new(name: &str, engine: Arc<std::sync::RwLock<KvEngine>>) -> Self {
         Self {
             inner: Arc::new(RwLock::new(SyncQueue::new(name, engine))),
@@ -35,7 +35,7 @@ impl AsyncQueue {
         }
     }
 
-    /// 建立具有自訂設定的非同步佇列
+    /// Create an async queue with custom configuration
     pub fn with_config(name: &str, engine: Arc<std::sync::RwLock<KvEngine>>, config: AsyncQueueConfig) -> Self {
         let q_config = QueueConfig {
             max_delivery_count: config.max_delivery_count,
@@ -49,7 +49,7 @@ impl AsyncQueue {
         }
     }
 
-    /// 取得當前佇列設定
+    /// Get the current queue config
     pub async fn config(&self) -> AsyncQueueConfig {
         let guard = self.inner.read().await;
         let c = guard.config();
@@ -61,7 +61,7 @@ impl AsyncQueue {
         }
     }
 
-    /// 將訊息加入佇列（入隊後通知等待的消費者）
+    /// Enqueue a message (notifies waiting consumers)
     pub async fn enqueue(&mut self, payload: Vec<u8>, visibility_timeout: u64) -> Result<String, String> {
         let res = {
             let mut guard = self.inner.write().await;
@@ -71,7 +71,7 @@ impl AsyncQueue {
         res
     }
 
-    /// 在指定時間將訊息加入佇列（延遲傳送）
+    /// Enqueue a message at a specific time (delayed delivery)
     pub async fn enqueue_at(&mut self, payload: Vec<u8>, visibility_timeout: u64, deliver_at: u64) -> Result<String, String> {
         let res = {
             let mut guard = self.inner.write().await;

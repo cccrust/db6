@@ -1,6 +1,6 @@
-//! 同步 SQL 執行器 — 基於 SyncQueue (blocking)
+//! Sync SQL Executor — based on SyncQueue (blocking)
 //!
-//! 使用 SyncQueue 作為工作佇列，以輪詢方式等待 SQL 執行結果。
+//! Uses SyncQueue as work queue, polling to wait for SQL execution results.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,17 +9,12 @@ use crate::kv::KvEngine;
 use crate::msgq::SyncQueue;
 use super::types::{JobResult, SqlJob};
 
-/// 同步 SQL 執行器
-///
-/// - `queue`: SyncQueue 儲存 SQL 工作
-/// - `results`: 執行結果的共享 Map
 pub struct SyncSqlExecutor {
     queue: SyncQueue,
     results: Arc<std::sync::Mutex<HashMap<String, JobResult>>>,
 }
 
 impl SyncSqlExecutor {
-    /// 建立新的同步 SQL 執行器
     pub fn new(engine: Arc<std::sync::RwLock<KvEngine>>) -> Self {
         let results = Arc::new(std::sync::Mutex::new(HashMap::new()));
         let queue = SyncQueue::new("sql", engine);
@@ -27,7 +22,6 @@ impl SyncSqlExecutor {
         Self { queue, results }
     }
 
-    /// 執行 SQL（阻塞等待結果）
     pub fn execute(&mut self, sql: &str) -> Result<JobResult, String> {
         let job = SqlJob::new(sql.to_string());
         let job_id = job.job_id.clone();
@@ -46,7 +40,6 @@ impl SyncSqlExecutor {
         }
     }
 
-    /// 執行 SQL 並設定超時
     pub fn execute_with_timeout(&mut self, sql: &str, timeout_ms: u64) -> Result<JobResult, String> {
         let job = SqlJob::new(sql.to_string());
         let job_id = job.job_id.clone();

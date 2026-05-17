@@ -1,9 +1,9 @@
-//! 高階查詢模組 — Fluent Method Chaining API
+//! High-level query module — Fluent Method Chaining API
 //!
-//! 提供類似 jQuery/Linq 風格的 Method Chaining 查詢介面。
-//! 使用者可以串聯方法呼叫來建構查詢，無需直接寫 SQL。
+//! Provides a jQuery/Linq-style method chaining query interface.
+//! Users can chain method calls to build queries without writing SQL directly.
 //!
-//! ## 使用方式
+//! ## Usage
 //!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -32,7 +32,7 @@ struct IndexDef {
     json_path: String,
 }
 
-/// Db 主入口
+/// Db main entry point
 pub struct Db {
     engine: KvEngine,
     table_map: HashMap<String, u32>,
@@ -41,7 +41,7 @@ pub struct Db {
 }
 
 impl Db {
-    /// 建立記憶體資料庫
+    /// Create an in-memory database
     pub fn new(engine_type: &str) -> Result<Self> {
         Ok(Db {
             engine: KvEngine::new(engine_type)?,
@@ -51,7 +51,7 @@ impl Db {
         })
     }
 
-    /// 建立持久化資料庫
+    /// Create a persistent database
     pub fn open(engine_type: &str, path: &Path) -> Result<Self> {
         Ok(Db {
             engine: KvEngine::open(engine_type, path)?,
@@ -387,7 +387,7 @@ impl<'a> InsertQuery<'a> {
         self
     }
 
-    /// 批次 values - [(key, value), ...]
+    /// Batch values - [(key, value), ...]
     pub fn values(&mut self, values: Vec<(impl Into<String>, impl Into<String>)>) -> &mut Self {
         for (k, v) in values {
             self.values.push((k.into(), v.into()));
@@ -492,7 +492,7 @@ impl<'a> UpdateQuery<'a> {
 }
 
 /// MapReduce fluent interface
-/// 設計：table("users").map(...).reduce(...).execute()
+/// Design: table("users").map(...).reduce(...).execute()
 pub struct MapReduceQuery<'a> {
     db: &'a mut Db,
     table_name: String,

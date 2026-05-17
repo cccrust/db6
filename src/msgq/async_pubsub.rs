@@ -1,11 +1,11 @@
-//! 非同步發布/訂閱實作 — 使用 tokio::sync::broadcast
+//! Async publish/subscribe implementation — using tokio::sync::broadcast
 //!
-//! 雙層架構：
-//! 1. 內層 SyncPubSub 負責 KV store 持久化
-//! 2. 外層 tokio broadcast 負責即時訊息傳遞
+//! Two-layer architecture:
+//! 1. Inner SyncPubSub handles KV store persistence
+//! 2. Outer tokio broadcast handles real-time message delivery
 //!
-//! 這樣既有持久化能力（崩潰後可復原歷史記錄），
-//! 又有 broadcast channel 的即時性。
+//! This provides both persistence (crash-recoverable history)
+//! and broadcast channel real-time delivery.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,28 +15,28 @@ use tokio::sync::RwLock;
 use crate::msgq::sync_pubsub::{PubSubConfig, SyncPubSub};
 use crate::kv::KvEngine;
 
-// 為無縫相容，將 SyncPubSubMessage 別名為 AsyncPubSubMessage
+// Alias SyncPubSubMessage as AsyncPubSubMessage for seamless compatibility
 pub use crate::msgq::SyncPubSubMessage as AsyncPubSubMessage;
 pub use crate::msgq::sync_pubsub::TopicMatcher;
 
-/// 將 MsgqError 轉換為 String
+/// Convert MsgqError to String
 fn map_err(e: crate::msgq::MsgqError) -> String {
     e.to_string()
 }
 
-/// 非同步模式訂閱者
+/// Async pattern subscriber
 ///
-/// 包含模式字串與相對應的 broadcast 接收器。
+/// Contains a pattern string and a corresponding broadcast receiver.
 pub struct AsyncPatternSubscriber {
     pub pattern: String,
     pub receiver: broadcast::Receiver<AsyncPubSubMessage>,
 }
 
-/// 非同步 Pub/Sub 伺服器
+/// Async Pub/Sub server
 ///
-/// - `inner`: SyncPubSub 負責持久化
-/// - `channels`: broadcast channel 負責即時傳遞
-/// - `config`: Pub/Sub 設定
+/// - `inner`: SyncPubSub handles persistence
+/// - `channels`: broadcast channel handles real-time delivery
+/// - `config`: Pub/Sub configuration
 pub struct AsyncPubSub {
     inner: Arc<RwLock<SyncPubSub>>,
     channels: Arc<RwLock<HashMap<String, broadcast::Sender<AsyncPubSubMessage>>>>,
@@ -44,7 +44,7 @@ pub struct AsyncPubSub {
 }
 
 impl AsyncPubSub {
-    /// 建立新的非同步 Pub/Sub 伺服器
+    /// Create a new async Pub/Sub server
     pub fn new(engine: Arc<std::sync::RwLock<KvEngine>>) -> Self {
         Self {
             inner: Arc::new(RwLock::new(SyncPubSub::new("default", engine))),

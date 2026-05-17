@@ -1,18 +1,18 @@
-//! 同步訊息佇列實作
+//! Sync message queue implementation
 //!
-//! FIFO 訊息佇列，支援優先級、可見性超時、死信佇列。
-//! 底層使用 KvEngine 儲存佇列資料，透過 table_id 隔離不同佇列。
+//! FIFO message queue with priority, visibility timeout, and dead letter queue.
+//! Uses KvEngine for data storage, with table_id for queue isolation.
 
 use crate::kv::{KvEngine, KvStore};
 use crate::msgq::{error::*, message::SyncQueueMessage};
 use std::sync::{Arc, RwLock};
 
-/// 佇列設定
+/// Queue configuration
 ///
-/// - `max_delivery_count`: 最大傳遞次數（超過進 DLQ，預設 3）
-/// - `dlq_name`: 死信佇列名稱（None 表示不啟用 DLQ）
-/// - `message_ttl_secs`: 訊息存活時間（秒）
-/// - `priority_enabled`: 是否啟用優先級排序
+/// - `max_delivery_count`: Max delivery count (excess goes to DLQ, default 3)
+/// - `dlq_name`: Dead letter queue name (None disables DLQ)
+/// - `message_ttl_secs`: Message time-to-live (seconds)
+/// - `priority_enabled`: Whether priority ordering is enabled
 #[derive(Debug, Clone)]
 pub struct QueueConfig {
     pub max_delivery_count: u32,
@@ -32,14 +32,14 @@ impl Default for QueueConfig {
     }
 }
 
-/// 同步佇列：封裝 KvEngine，提供 FIFO 訊息佇列功能
+/// Sync queue: wraps KvEngine to provide FIFO message queue functionality
 pub struct SyncQueue {
     name: String,
     engine: Arc<RwLock<KvEngine>>,
     config: QueueConfig,
 }
 
-/// 佇列中繼資料
+/// Queue metadata
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct QueueMeta {
     pub total_enqueued: u64,
@@ -48,7 +48,7 @@ pub struct QueueMeta {
 }
 
 impl SyncQueue {
-    /// 建立新的同步佇列
+    /// Create a new sync queue
     pub fn new(name: &str, engine: Arc<RwLock<KvEngine>>) -> Self {
         Self {
             name: name.to_string(),
@@ -57,7 +57,7 @@ impl SyncQueue {
         }
     }
 
-    /// 建立具有自訂設定的同步佇列
+    /// Create a sync queue with custom configuration
     pub fn with_config(name: &str, engine: Arc<RwLock<KvEngine>>, config: QueueConfig) -> Self {
         Self {
             name: name.to_string(),
