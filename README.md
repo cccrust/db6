@@ -1,55 +1,120 @@
 # db6
 
-Unified database with pluggable storage engines (Memory/BTree/LSM) (KV + FTS + SQL)
+[![Crates.io][crates-badge]][crates-url]
+[![MIT licensed][mit-badge]][mit-url]
 
-## 快速開始
+[crates-badge]: https://img.shields.io/crates/v/db6.svg
+[crates-url]: https://crates.io/crates/db6
+[mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
+[mit-url]: https://github.com/cccrust/db6/blob/main/LICENSE
+
+Unified database with pluggable storage engines + KV + SQL + FTS + Message Queue.
+
+## Installation
 
 ```bash
-cargo build    # 編譯
-cargo test     # 測試
+cargo add db6
 ```
 
-## 版本策略
+## Quick Start
 
-- **v0.x**: 專注 KV 層（StorageEngine trait + 三種引擎）
-- **v1.0+**: 加入 FTS 層
-- **v2.0+**: 加入 SQL 層
+```bash
+cargo build    # Build
+cargo test     # Run all tests
+cargo run      # REPL
+```
 
-## 儲存引擎
+## Storage Engines
 
-| 引擎 | 特性 | 適用場景 |
-|------|------|---------|
-| Memory | BTreeMap，記憶體純 KV | 快速實驗、高效能快取 |
-| BTree | 磁碟 BTree，完整交易 | SQLite 相容 |
-| LSM | LSM-tree，高寫入量 | 寫優化場景 |
+| Engine | Backend | Features | Use Case |
+|--------|---------|----------|----------|
+| Memory | BTreeMap | In-memory KV, ORDER BY, range scan | Prototyping, cache |
+| BTree  | Disk BTree | Full transactions, persistence | SQLite-compatible |
+| LSM    | LSM-tree | Bloom filter, WAL, high write throughput | Write-heavy workloads |
 
-## 核心 API
+## Key-Value API
+
+Any storage engine implements `StorageEngine` trait. Use `KvEngine` for engine-agnostic access:
 
 ```rust
-use db6::{StorageEngine, EngineStats};
+use db6::{KvEngine, KvStore};
 
-let engine = MemoryEngine::open_memory();
+let engine = KvEngine::new("memory")?;
 engine.put(1, b"key", b"value")?;
-let value = engine.get(1, b"key")?;
-let rows = engine.scan(1, b"", b"")?;
+let val = engine.get(1, b"key")?;
+engine.delete(1, b"key")?;
 ```
 
-## 目錄結構
+## SQL
 
+```rust
+use db6::{parse, Executor, ResultSet};
+
+let stmts = parse("SELECT * FROM users WHERE age > 18")?;
+let mut exec = Executor::new(engine);
+let result = exec.execute(&stmts[0])?;
 ```
-src/
-├── engine/       # 儲存引擎 (memory, btree, lsm)
-├── kv/           # KvStore trait
-├── sql/          # SQL 層 (v1.0 才加入)
-└── fts/          # FTS5 (基於 KV 介面)
+
+## Fluent Query API
+
+```rust
+use db6::Db;
+
+let mut db = Db::new("memory")?;
+let rows = db.select("name, email")
+    .from("users")
+    .filter("age > 18")
+    .execute()?;
 ```
 
-## 相關專案
+## Full-Text Search
 
-- [sql6](https://github.com/cccrust/sp6) — SQL 實作來源
-- [lsm5](https://github.com/cccrust/lsm5) — LSM 實作來源
-- [btree6](https://github.com/cccrust/btree6) — BTree 實作來源
+```rust
+use db6::{FtsIndex, FtsTokenizer, CjkTokenizer};
 
-## 開發計畫
+let mut index = FtsIndex::new(engine);
+index.insert(1, "資料庫系統")?;
+let results = index.search("資料")?;
+let ranked = index.search_bm25("資料")?;
+```
 
-See [_doc/plan.md](_doc/plan.md) for full roadmap.
+## Message Queue
+
+```rust
+use db6::msgq::Msgq;
+
+let msgq = Msgq::new("memory")?;
+let mut queue = msgq.queue("tasks");
+queue.enqueue(b"work".to_vec(), 30)?;
+let msg = queue.dequeue(0)?;
+queue.ack(&msg.unwrap().id)?;
+```
+
+## Publish
+
+```bash
+./pub.sh <new_version>
+# e.g. ./pub.sh 4.14.0
+```
+
+The script updates `Cargo.toml`, runs tests, commits to git, pushes to GitHub, and publishes to crates.io.
+
+## Version History
+
+| Phase | Version | Features |
+|-------|---------|----------|
+| v0.x | 0.x | StorageEngine trait + 3 engines |
+| v1.0+ | 1.x | FTS (inverted index + BM25) |
+| v2.0+ | 2.x | SQL (parser, planner, executor) |
+| v3.0+ | 3.x | Query fluent API + LSM enhancements |
+| v4.0+ | 4.x | Message Queue (sync + async) |
+
+## Related Projects
+
+- [btree6](https://github.com/cccrust/btree6) — BTree engine
+- [lsm5](https://github.com/cccrust/lsm5) — LSM engine
+- [sp6](https://github.com/cccrust/sp6) — SQL implementation
+
+## License
+
+MIT
