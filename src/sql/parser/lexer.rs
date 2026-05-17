@@ -244,7 +244,8 @@ fn keyword(s: &str) -> Option<Token> {
 ///
 /// ## 使用方式
 ///
-/// ```ignore
+/// ```
+/// use db6::sql::parser::lexer::Lexer;
 /// let mut lexer = Lexer::new("SELECT * FROM users");
 /// let tokens = lexer.tokenize().unwrap();
 /// ```

@@ -164,19 +164,10 @@ impl<E: StorageEngine> FtsIndex<E> {
 
     /// 取得包含指定詞彙的所有文件 ID（輔助方法）
     fn get_doc_ids_for_term(&self, term: &str) -> Result<BTreeSet<u64>> {
-        let prefix = format!("T:{}:", term);
-        let scan_start = format!("T:{}:", term);
-        let scan_end = format!("T:{}~\0", term);
-
         let mut doc_ids = BTreeSet::new();
-        if let Ok(matches) = self.engine.scan(FTS_TABLE_ID, scan_start.as_bytes(), scan_end.as_bytes()) {
-            for (key, _) in matches {
-                let key_str = String::from_utf8_lossy(&key);
-                if let Some(pos) = key_str.strip_prefix(&prefix) {
-                    if let Ok(doc_id) = pos.parse::<u64>() {
-                        doc_ids.insert(doc_id);
-                    }
-                }
+        for doc_id in self.get_all_doc_ids()? {
+            if self.get_term_frequency(doc_id, term)? > 0 {
+                doc_ids.insert(doc_id);
             }
         }
         Ok(doc_ids)
@@ -329,14 +320,30 @@ impl<E: StorageEngine> FtsIndex<E> {
         Ok(sorted)
     }
 
+    /// 取得所有已索引的文件 ID
+    fn get_all_doc_ids(&self) -> Result<Vec<u64>> {
+        let mut ids = Vec::new();
+        if let Ok(results) = self.engine.scan(FTS_TABLE_ID, b"D:", b"D:~\0") {
+            for (key, _) in results {
+                let key_str = String::from_utf8_lossy(&key);
+                if let Some(id_str) = key_str.strip_prefix("D:") {
+                    if let Ok(doc_id) = id_str.parse::<u64>() {
+                        ids.push(doc_id);
+                    }
+                }
+            }
+        }
+        ids.sort();
+        Ok(ids)
+    }
+
     /// 取得詞彙的文件頻率 (DF)：包含該詞彙的文件數量
     fn get_document_frequency(&self, term: &str) -> Result<u32> {
-        let scan_start = format!("T:{}:", term);
-        let scan_end = format!("T:{}~\0", term).into_bytes();
-
         let mut count = 0u32;
-        if let Ok(matches) = self.engine.scan(FTS_TABLE_ID, scan_start.as_bytes(), &scan_end) {
-            count = matches.len() as u32;
+        for doc_id in self.get_all_doc_ids()? {
+            if self.get_term_frequency(doc_id, term)? > 0 {
+                count += 1;
+            }
         }
         Ok(count)
     }
@@ -370,18 +377,16 @@ impl<E: StorageEngine> FtsIndex<E> {
         }
 
         let mut total_len = 0u64;
-        let scan_start = "D:".as_bytes();
-        let scan_end = "D:~\0".as_bytes();
-
-        if let Ok(docs) = self.engine.scan(FTS_TABLE_ID, scan_start, scan_end) {
-            for (_key, value) in docs {
-                let text_str = String::from_utf8_lossy(&value);
-                let tokenizer = CjkTokenizer::new();
-                total_len += tokenizer.tokenize(&text_str).len() as u64;
-            }
+        let mut count = 0u64;
+        for doc_id in self.get_all_doc_ids()? {
+            total_len += self.get_doc_length(doc_id)? as u64;
+            count += 1;
         }
 
-        Ok(total_len as f64 / self.doc_count as f64)
+        if count == 0 {
+            return Ok(0.0);
+        }
+        Ok(total_len as f64 / count as f64)
     }
 
     /// 傳回已索引的文件數量
@@ -494,7 +499,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "BM25 scoring pre-existing issue"]
     fn test_fts_bm25() {
         let engine = HashMemoryEngine::new();
         let mut index = super::FtsIndex::new(engine);
@@ -506,7 +510,7 @@ mod tests {
         let results = index.search_bm25("hello").unwrap();
         assert!(!results.is_empty());
         
-        let (doc_id, score) = results[0];
+        let (_doc_id, score) = results[0];
         assert!(score >= 0.0);
     }
 

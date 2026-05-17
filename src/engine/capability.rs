@@ -1,40 +1,40 @@
-//! 引擎能力查詢系統 (Capability System)
+//! 能力標記系統 (Capability Markers)
 //!
-//! 透過 Marker Trait 在編譯期檢查引擎是否支援特定功能。
-//! 例如：HashMemoryEngine 不實作 CanOrderBy，因此在記憶體 HashMap 引擎上執行
-//! ORDER BY 查詢時，編譯器就會報錯，而不是在執行期才發現不支援。
+//! 由於 StorageEngine trait 加上 `where Self: Sized` 限制後無法用 `Box<dyn StorageEngine>`，
+//! 改用能力標記 trait 在編譯期標記引擎支援哪些功能。
 //!
-//! 這種設計稱作「編譯期能力宣告」(Compile-time Capability Declaration)，
-//! 相較於執行期錯誤檢查，能在開發早期發現問題。
+//! 如果引擎不支援某功能（如 JOIN），執行器在執行期回傳錯誤，而非在編譯期禁止。
 
 use crate::engine::StorageEngine;
 
-/// 標記引擎支援 ORDER BY（即支援範圍掃描）
+/// 標記引擎支援 ORDER BY 排序
 ///
-/// 實作此 trait 的引擎（BTreeMemoryEngine, BTreeEngine, LsmEngine）
-/// 可以對查詢結果進行排序。
+/// 需要引擎的 scan() 能按照鍵的順序遍歷（BTreeMap、BTree Engine 原生支援）。
 pub trait CanOrderBy: StorageEngine {}
 
 /// 標記引擎支援 JOIN 操作
 ///
-/// 目前僅 BTreeMemoryEngine 實作此功能。
+/// JOIN 需要引擎能夠在同一個 table_id 內進行多次掃描並關聯結果。
 pub trait CanJoin: StorageEngine {}
 
-/// 標記引擎支援全文搜尋 (FTS)
+/// 標記引擎支援全文搜尋（FTS）
+///
+/// FTS 需要引擎支援前綴掃描（prefix scan）以遍歷倒排索引。
 pub trait CanFts: StorageEngine {}
 
-/// 標記引擎支援交易 (BEGIN/COMMIT/ROLLBACK)
+/// 標記引擎支援交易（Transaction）
 ///
-/// 磁碟引擎（BTreeEngine, LsmEngine）支援交易，
-/// 記憶體引擎目前不支援。
+/// 交易需要引擎支援 begin/commit/rollback 語意。
 pub trait CanTransaction: StorageEngine {}
 
-/// 標記引擎支援範圍掃描（不只是單點查詢）
+/// 標記引擎支援範圍掃描（Range Scan）
 ///
-/// HashMemoryEngine 不實作此 trait，因為 HashMap 不支援範圍掃描。
+/// 所有引擎都應支援 scan()，此標記用於語意區分。
 pub trait CanScan: StorageEngine {}
 
-/// 標記引擎支援批量操作 (batch_put, range_delete)
+/// 標記引擎支援批次操作
+///
+/// batch_put 與 range_delete 的最佳化實作。
 pub trait CanBatch: StorageEngine {}
 
 /// 標記引擎支援 GROUP BY 與聚合函數
@@ -44,16 +44,9 @@ pub trait CanGroupBy: StorageEngine {}
 
 /// 快速實作能力標記的輔助巨集
 ///
-/// 範例：
-/// ```ignore
-/// impl_capabilities!(BTreeMemoryEngine, CanOrderBy, CanScan, CanBatch);
-/// ```
-/// 上述巨集展開為：
-/// ```ignore
-/// impl CanOrderBy for BTreeMemoryEngine {}
-/// impl CanScan for BTreeMemoryEngine {}
-/// impl CanBatch for BTreeMemoryEngine {}
-/// ```
+/// 接受引擎型別與一或多個能力 trait，自動產生對應的 impl 區塊。
+/// 例如 `impl_capabilities!(HashMemoryEngine, CanOrderBy, CanScan)` 會展開為：
+/// `impl CanOrderBy for HashMemoryEngine {}` 和 `impl CanScan for HashMemoryEngine {}`。
 #[macro_export]
 macro_rules! impl_capabilities {
     ($engine:ident, $( $cap:ident ),*) => {

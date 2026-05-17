@@ -2,24 +2,6 @@
 //!
 //! 類似 mini-redis 的設計：協調多個非同步任務的關閉時機。
 //! 當收到關閉訊號時，所有 subscribe 的任務都會收到通知。
-//!
-//! ## 使用方式
-//!
-//! ```ignore
-//! let shutdown = GracefulShutdown::new();
-//! let mut handle = shutdown.subscribe();
-//!
-//! tokio::spawn(async move {
-//!     loop {
-//!         tokio::select! {
-//!             _ = handle.recv() => break,  // 收到關閉訊號
-//!             _ = do_work() => continue,
-//!         }
-//!     }
-//! });
-//!
-//! shutdown.shutdown();  // 觸發所有任務關閉
-//! ```
 
 use std::sync::Arc;
 use tokio::sync::broadcast;

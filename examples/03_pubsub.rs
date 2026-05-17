@@ -54,7 +54,7 @@ fn main() {
 
     // 再次發布 sports，reader1 不會收到了
     pubsub.publish("sports", b"Final score: 3-1".to_vec()).unwrap();
-    if let Some(msg) = pubsub.consume("sports", "reader1").unwrap() {
+    if pubsub.consume("sports", "reader1").unwrap().is_some() {
         println!("  Should not happen!");
     } else {
         println!("  reader1 correctly unsubscribed from sports");

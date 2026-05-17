@@ -5,13 +5,16 @@
 //!
 //! ## 使用方式
 //!
-//! ```ignore
-//! let mut db = Db::new("memory")?;
+//! ```no_run
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut db = db6::Db::new("memory")?;
 //!
-//! let rows = db.table("users")
-//!     .select(&["name", "email"])
-//!     .filter("age", ">", 18)
-//!     .run()?;
+//! let rows = db.select("name, email")
+//!     .from("users")
+//!     .filter("age > 18")
+//!     .execute()?;
+//! # Ok(())
+//! # }
 //! ```
 
 use std::collections::HashMap;

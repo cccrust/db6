@@ -1,13 +1,6 @@
-//! AsyncQueue Stream 介面 — 實作 tokio_stream::Stream trait
+//! AsyncQueue Stream 介面 — 實作 futures::stream::Stream trait
 //!
-//! 允許消費者使用 `while let` 語法消費訊息：
-//!
-//! ```ignore
-//! let mut stream = queue.stream();
-//! while let Some(msg) = stream.next().await {
-//!     process(msg).await;
-//! }
-//! ```
+//! 允許消費者使用 `while let` 語法消費訊息。
 
 use super::queue::AsyncQueue;
 use super::AsyncQueueMessage;

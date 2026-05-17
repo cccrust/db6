@@ -220,22 +220,7 @@ impl Parser {
                         if !self.maybe(&Token::Comma) { break; }
                         continue;
 }
-
-    #[test]
-    fn create_virtual_table() {
-        let sql = "CREATE VIRTUAL TABLE articles USING fts(title, content)";
-        let stmts = parse(sql).unwrap();
-        assert_eq!(stmts.len(), 1);
-        
-        match &stmts[0] {
-            Statement::CreateVirtualTable(stmt) => {
-                assert_eq!(stmt.name, "articles");
-                assert_eq!(stmt.columns, vec!["title", "content"]);
             }
-            _ => panic!("expected CreateVirtualTable"),
-        }
-    }
-}
                 let alias = if self.maybe(&Token::As) {
                     Some(self.eat_ident()?)
                 } else if let Token::Ident(_) = self.peek() {
