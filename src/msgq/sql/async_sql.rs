@@ -1,35 +1,76 @@
-//! Async SQL Executor - 基於 AsyncQueue + tokio
+//! Async SQL Executor - 基於 tokio + mini-redis 模式
+//!
+//! 設計原則：
+//! - 每個 SQL 獨立 task（非 worker pool）
+//! - Semaphore 限制並發數
+//! - Graceful shutdown 支援
+//! - tokio::select! 多任務監聽
 
-use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Semaphore, broadcast};
 
-use crate::msgq::AsyncQueue;
 use super::types::{JobResult, ResultStore, SqlJob};
 
+const DEFAULT_CONCURRENCY_LIMIT: usize = 100;
+
 pub struct AsyncSqlExecutor {
-    queue: AsyncQueue,
     results: ResultStore,
+    semaphore: Arc<Semaphore>,
+    concurrency_limit: Arc<AtomicUsize>,
+    shutdown: broadcast::Sender<()>,
 }
 
 impl AsyncSqlExecutor {
     pub fn new(result_store: ResultStore) -> Self {
+        Self::with_concurrency_limit(result_store, DEFAULT_CONCURRENCY_LIMIT)
+    }
+
+    pub fn with_concurrency_limit(result_store: ResultStore, limit: usize) -> Self {
+        let (shutdown, _) = broadcast::channel(1);
+
         Self {
-            queue: AsyncQueue::new("sql"),
             results: result_store,
+            semaphore: Arc::new(Semaphore::new(limit)),
+            concurrency_limit: Arc::new(AtomicUsize::new(limit)),
+            shutdown,
         }
     }
 
-    pub async fn execute(&mut self, sql: &str) -> Result<String, String> {
+    /// 執行 SQL - 每個 SQL 立即 spawn 獨立 task（真正並發）
+    pub async fn execute(&self, sql: &str) -> Result<String, String> {
         let job = SqlJob::new(sql.to_string());
         let job_id = job.job_id.clone();
-        let payload = job.serialize()?;
+        let results = self.results.clone();
+        let semaphore = self.semaphore.clone();
+        let mut shutdown_rx = self.shutdown.subscribe();
 
-        self.queue.enqueue(payload, 30).await?;
+        // Spawn 獨立 task 處理這個 SQL
+        tokio::spawn(async move {
+            // 取得並發許可（在 task 內部，這樣 permit 屬於這個 task
+            let permit = semaphore.acquire_owned().await.ok();
+
+            // 監聽 shutdown 訊號 + 執行 SQL
+            let result = tokio::select! {
+                res = execute_sql(&job.sql) => res,
+                _ = shutdown_rx.recv() => {
+                    JobResult::Error { message: "server shutting down".to_string() }
+                }
+            };
+
+            // 儲存結果
+            if let Err(e) = results.store(&job.job_id, result).await {
+                eprintln!("Failed to store result: {}", e);
+            }
+
+            // 釋放並發許可
+            drop(permit);
+        });
 
         Ok(job_id)
     }
 
+    /// 輪詢結果
     pub async fn poll(&self, job_id: &str) -> Result<JobResult, String> {
         match self.results.get(job_id).await {
             Ok(Some(result)) => Ok(result),
@@ -38,8 +79,9 @@ impl AsyncSqlExecutor {
         }
     }
 
+    /// 執行並等待結果（內部使用 timeout）
     pub async fn execute_and_wait(
-        &mut self,
+        &self,
         sql: &str,
         timeout_ms: u64,
     ) -> Result<JobResult, String> {
@@ -71,59 +113,29 @@ impl AsyncSqlExecutor {
         }
     }
 
-    pub fn spawn_workers(&self, count: usize) {
-        for _ in 0..count {
-            let queue = self.queue.clone();
-            let results = self.results.clone();
-
-            tokio::spawn(async move {
-                worker_loop(queue, results).await;
-            });
-        }
+    /// 觸發 graceful shutdown
+    pub fn shutdown(&self) {
+        let _ = self.shutdown.send(());
     }
 
-    pub async fn queue_length(&self) -> Result<usize, String> {
-        self.queue.length().await
+    /// 取得可用並發數
+    pub fn available_concurrency(&self) -> usize {
+        self.semaphore.available_permits()
+    }
+
+    /// 取得並發限制
+    pub fn concurrency_limit(&self) -> usize {
+        self.concurrency_limit.load(Ordering::Relaxed)
     }
 }
 
 impl Clone for AsyncSqlExecutor {
     fn clone(&self) -> Self {
         Self {
-            queue: self.queue.clone(),
             results: self.results.clone(),
-        }
-    }
-}
-
-async fn worker_loop(mut queue: AsyncQueue, results: ResultStore) {
-    loop {
-        match queue.dequeue(0).await {
-            Ok(Some(msg)) => {
-                let job = match SqlJob::deserialize(&msg.payload) {
-                    Ok(j) => j,
-                    Err(e) => {
-                        eprintln!("Failed to deserialize job: {}", e);
-                        let _ = queue.nack(&msg.id).await;
-                        continue;
-                    }
-                };
-
-                let result = execute_sql(&job.sql).await;
-
-                if let Err(e) = results.store(&job.job_id, result).await {
-                    eprintln!("Failed to store result: {}", e);
-                }
-
-                let _ = queue.ack(&msg.id).await;
-            }
-            Ok(None) => {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            }
-            Err(e) => {
-                eprintln!("Worker error: {}", e);
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            }
+            semaphore: self.semaphore.clone(),
+            concurrency_limit: self.concurrency_limit.clone(),
+            shutdown: self.shutdown.clone(),
         }
     }
 }
@@ -131,14 +143,19 @@ async fn worker_loop(mut queue: AsyncQueue, results: ResultStore) {
 async fn execute_sql(sql: &str) -> JobResult {
     // TODO: 整合現有的 SQL executor
     // 目前回傳模擬結果
+    
+    // 模擬 SQL 執行延遲（測試並發用）
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    
     let sql_lower = sql.trim().to_lowercase();
 
     if sql_lower.starts_with("select") {
         JobResult::Select {
-            columns: vec!["id".to_string(), "name".to_string()],
+            columns: vec!["id".to_string(), "name".to_string(), "email".to_string()],
             rows: vec![
-                vec![serde_json::json!(1), serde_json::json!("Alice")],
-                vec![serde_json::json!(2), serde_json::json!("Bob")],
+                vec![serde_json::json!(1), serde_json::json!("Alice"), serde_json::json!("alice@example.com")],
+                vec![serde_json::json!(2), serde_json::json!("Bob"), serde_json::json!("bob@example.com")],
+                vec![serde_json::json!(3), serde_json::json!("Charlie"), serde_json::json!("charlie@example.com")],
             ],
         }
     } else if sql_lower.starts_with("insert") {
@@ -163,7 +180,7 @@ async fn execute_sql(sql: &str) -> JobResult {
         JobResult::Drop { table_name: table.to_string() }
     } else {
         JobResult::Error {
-            message: "Unknown SQL type".to_string(),
+            message: format!("Unknown SQL type: {}", sql),
         }
     }
 }
