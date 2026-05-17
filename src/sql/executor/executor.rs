@@ -426,7 +426,9 @@ impl Executor {
     }
 
     fn execute_update(&mut self, update: &crate::sql::parser::ast::UpdateStmt) -> Result<ResultSet> {
-        let rows = self.engine.scan(1, b"", b"")?;
+        let table_prefix = get_table_prefix(&update.table);
+        let table_end = format!("{};", update.table);
+        let rows = self.engine.scan(1, &table_prefix, table_end.as_bytes())?;
         let mut affected = 0;
 
         let new_value = if !update.sets.is_empty() {
@@ -443,7 +445,12 @@ impl Executor {
         };
 
         if let Some(value) = new_value {
-            for (key, _) in rows {
+            for (key, val) in rows {
+                if let Some(ref where_expr) = update.where_ {
+                    if !eval_expr(where_expr, &val) {
+                        continue;
+                    }
+                }
                 self.engine.put(1, &key, value.as_bytes())?;
                 affected += 1;
             }
@@ -453,10 +460,17 @@ impl Executor {
     }
 
     fn execute_delete(&mut self, delete: &crate::sql::parser::ast::DeleteStmt) -> Result<ResultSet> {
-        let rows = self.engine.scan(1, b"", b"")?;
+        let table_prefix = get_table_prefix(&delete.table);
+        let table_end = format!("{};", delete.table);
+        let rows = self.engine.scan(1, &table_prefix, table_end.as_bytes())?;
         let mut affected = 0;
 
-        for (key, _) in rows {
+        for (key, val) in rows {
+            if let Some(ref where_expr) = delete.where_ {
+                if !eval_expr(where_expr, &val) {
+                    continue;
+                }
+            }
             self.engine.delete(1, &key)?;
             affected += 1;
         }

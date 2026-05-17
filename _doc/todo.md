@@ -42,8 +42,8 @@
 如果有錯很難解決，你嘗試幾次卻無法解決，不用硬做，直接留著錯誤 (test.sh) 告訴我現況，我讓 gemini 來解
 
 ### v3.14 - JOIN 支援
-- [ ] JoinQuery 結構
-- [ ] INNER JOIN / LEFT JOIN
+- [x] JoinQuery 結構
+- [x] INNER JOIN / LEFT JOIN
 
 ### v3.15 - SQL Executor 完整實作
 - [ ] INSERT executor
