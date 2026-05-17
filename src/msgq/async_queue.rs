@@ -1,4 +1,8 @@
 //! Async Queue Implementation using tokio channels
+//!
+//! Monitoring features: Metrics and Health Check
+
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
 use futures::stream::Stream;
@@ -13,6 +17,98 @@ use tokio::sync::Notify;
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 use tokio::time::Instant;
+
+#[derive(Debug, Clone)]
+pub struct QueueMetrics {
+    pub enqueued_total: Arc<AtomicU64>,
+    pub dequeued_total: Arc<AtomicU64>,
+    pub acked_total: Arc<AtomicU64>,
+    pub nacked_total: Arc<AtomicU64>,
+    pub in_flight: Arc<AtomicU64>,
+    pub queue_depth: Arc<AtomicU64>,
+}
+
+impl QueueMetrics {
+    pub fn new() -> Self {
+        Self {
+            enqueued_total: Arc::new(AtomicU64::new(0)),
+            dequeued_total: Arc::new(AtomicU64::new(0)),
+            acked_total: Arc::new(AtomicU64::new(0)),
+            nacked_total: Arc::new(AtomicU64::new(0)),
+            in_flight: Arc::new(AtomicU64::new(0)),
+            queue_depth: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    pub fn enqueued_inc(&self) {
+        self.enqueued_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn dequeued_inc(&self) {
+        self.dequeued_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn acked_inc(&self) {
+        self.acked_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn nacked_inc(&self) {
+        self.nacked_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn in_flight_set(&self, count: u64) {
+        self.in_flight.store(count, Ordering::Relaxed);
+    }
+
+    pub fn queue_depth_set(&self, depth: u64) {
+        self.queue_depth.store(depth, Ordering::Relaxed);
+    }
+}
+
+impl Default for QueueMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum HealthStatus {
+    Healthy,
+    Degraded(String),
+    Unhealthy(String),
+}
+
+pub struct QueueHealth {
+    pub status: HealthStatus,
+    pub details: std::collections::HashMap<String, String>,
+}
+
+impl QueueHealth {
+    pub fn healthy() -> Self {
+        Self {
+            status: HealthStatus::Healthy,
+            details: std::collections::HashMap::new(),
+        }
+    }
+
+    pub fn degraded(reason: &str) -> Self {
+        let mut details = std::collections::HashMap::new();
+        details.insert("reason".to_string(), reason.to_string());
+        Self {
+            status: HealthStatus::Degraded(reason.to_string()),
+            details,
+        }
+    }
+
+    pub fn unhealthy(reason: &str) -> Self {
+        let mut details = std::collections::HashMap::new();
+        details.insert("reason".to_string(), reason.to_string());
+        Self {
+            status: HealthStatus::Unhealthy(reason.to_string()),
+            details,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AsyncQueueMessage {
@@ -208,6 +304,7 @@ pub struct AsyncQueue {
     priority_messages: Arc<RwLock<Vec<AsyncQueueMessage>>>,
     config: AsyncQueueConfig,
     dlq: Arc<RwLock<Vec<AsyncQueueMessage>>>,
+    metrics: Arc<QueueMetrics>,
 }
 
 impl AsyncQueue {
@@ -219,6 +316,7 @@ impl AsyncQueue {
             priority_messages: Arc::new(RwLock::new(Vec::new())),
             config: AsyncQueueConfig::default(),
             dlq: Arc::new(RwLock::new(Vec::new())),
+            metrics: Arc::new(QueueMetrics::new()),
         }
     }
 
@@ -230,6 +328,33 @@ impl AsyncQueue {
             priority_messages: Arc::new(RwLock::new(Vec::new())),
             config,
             dlq: Arc::new(RwLock::new(Vec::new())),
+            metrics: Arc::new(QueueMetrics::new()),
+        }
+    }
+
+    pub fn metrics(&self) -> Arc<QueueMetrics> {
+        self.metrics.clone()
+    }
+
+    pub async fn health(&self) -> QueueHealth {
+        let depth = self.length().await.unwrap_or(0);
+        let inflight = {
+            let inflight = self.inflight.read().await;
+            inflight.len() as u64
+        };
+
+        if depth > 10000 {
+            QueueHealth::unhealthy("queue depth exceeds 10000")
+        } else if inflight > 5000 {
+            QueueHealth::degraded("high in-flight message count")
+        } else {
+            let mut details = std::collections::HashMap::new();
+            details.insert("depth".to_string(), depth.to_string());
+            details.insert("inflight".to_string(), inflight.to_string());
+            QueueHealth {
+                status: HealthStatus::Healthy,
+                details,
+            }
         }
     }
 
@@ -255,6 +380,9 @@ impl AsyncQueue {
 
         let mut messages = self.messages.write().await;
         messages.push(msg);
+
+        self.metrics.enqueued_inc();
+        self.metrics.queue_depth_set(messages.len() as u64);
 
         Ok(msg_id)
     }
@@ -349,6 +477,8 @@ impl AsyncQueue {
                 drop(inflight);
                 let mut inflight = self.inflight.write().await;
                 inflight.push(msg.id.clone());
+                self.metrics.dequeued_inc();
+                self.metrics.in_flight_set(inflight.len() as u64);
                 return Ok(Some(msg));
             }
 
@@ -392,6 +522,10 @@ impl AsyncQueue {
         let mut inflight = self.inflight.write().await;
         inflight.retain(|id| id != msg_id);
 
+        self.metrics.acked_inc();
+        self.metrics.in_flight_set(inflight.len() as u64);
+        self.metrics.queue_depth_set(messages.len() as u64);
+
         Ok(())
     }
 
@@ -406,6 +540,9 @@ impl AsyncQueue {
 
         let mut inflight = self.inflight.write().await;
         inflight.retain(|id| id != msg_id);
+
+        self.metrics.nacked_inc();
+        self.metrics.in_flight_set(inflight.len() as u64);
 
         Ok(())
     }
@@ -526,6 +663,7 @@ impl Clone for AsyncQueue {
             priority_messages: self.priority_messages.clone(),
             config: self.config.clone(),
             dlq: self.dlq.clone(),
+            metrics: self.metrics.clone(),
         }
     }
 }
