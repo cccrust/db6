@@ -26,7 +26,7 @@ pub enum Token {
     Pragma, Explain, Alter, Rename, To, Add, Column, Do, Of,  // v1.3
     View, Reindex, Analyze, Temp, Conflict, Nothing, Union, Check, Cast, Default, GLOB,  // v1.5-1.14
     Trigger, Before, After, Instead, Each, Row, For, When, End, AutoIncrement,  // v1.9+
-    Attach, Detach, Database, Vacuum,  // v1.18-1.19
+    Attach, Detach, Database, Vacuum, Backup,  // v1.18-1.19
 
     // ── 識別符 ──────────────────────────────────────────────────────────
     Ident(String),
@@ -169,6 +169,7 @@ fn keyword(s: &str) -> Option<Token> {
         "DETACH"       => Some(Token::Detach),
         "DATABASE"     => Some(Token::Database),
         "VACUUM"       => Some(Token::Vacuum),
+        "BACKUP"       => Some(Token::Backup),
         _             => None,
     }
 }

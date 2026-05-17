@@ -82,6 +82,8 @@ pub enum Statement {
     Detach { alias: String },
     /// VACUUM 清理資料庫
     Vacuum,
+    /// BACKUP 備份資料庫
+    Backup(BackupStmt),
     /// BEGIN 開始交易
     Begin,
     /// COMMIT 提交交易
@@ -533,6 +535,13 @@ pub struct ReindexStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalyzeStmt {
     pub name: Option<String>,
+}
+
+// ── BACKUP ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BackupStmt {
+    pub path: String,
 }
 
 // ── 運算式 ────────────────────────────────────────────────────────────────

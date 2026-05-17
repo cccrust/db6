@@ -132,6 +132,7 @@ impl Parser {
             Token::Attach   => self.parse_attach(),
             Token::Detach   => self.parse_detach(),
             Token::Vacuum   => { self.advance(); Ok(Statement::Vacuum) }
+            Token::Backup   => Ok(Statement::Backup(self.parse_backup()?)),
             t => Err(format!("unexpected token {:?}", t)),
         }
     }
@@ -793,7 +794,7 @@ impl Parser {
             | Token::Virtual | Token::Match | Token::With | Token::Recursive
             | Token::References | Token::KwInteger | Token::Real | Token::Blob
             | Token::Boolean | Token::Nothing | Token::Do | Token::Attach
-            | Token::Detach | Token::Database | Token::Vacuum => {
+            | Token::Detach | Token::Database | Token::Vacuum | Token::Backup => {
                 Some(format!("{:?}", token).to_uppercase())
             }
             Token::Ident(s) => Some(s.clone()),
@@ -839,6 +840,19 @@ impl Parser {
             Some(self.eat_ident()?)
         } else { None };
         Ok(AnalyzeStmt { name })
+    }
+
+    // ── BACKUP ─────────────────────────────────────────────────────────────
+
+    fn parse_backup(&mut self) -> Result<BackupStmt, String> {
+        self.eat(&Token::Backup)?;
+        self.eat(&Token::To)?;
+        let tok = self.peek().clone();
+        let path = match tok {
+            Token::LitStr(s) => { self.advance(); s }
+            _ => return Err(format!("expected string literal for path, got {:?}", self.peek())),
+        };
+        Ok(BackupStmt { path })
     }
 
     // ── ATTACH ─────────────────────────────────────────────────────────────

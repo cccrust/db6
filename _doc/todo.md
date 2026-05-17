@@ -1,5 +1,10 @@
 # db6 待辦事項
 
+msgq/ Message Queye (redis)
+
+redis 的功能，有什麼 db6/kv 沒做的呢？
+
+
 ## KV 適用功能（ LSM / Hash / BTreeMemory ）
 
 ### v3.7 - JSON 過濾支援 (已完成)
