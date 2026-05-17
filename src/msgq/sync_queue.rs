@@ -4,9 +4,29 @@ use crate::kv::{KvEngine, KvStore};
 use crate::msgq::{error::*, message::SyncQueueMessage};
 use std::sync::{Arc, RwLock};
 
+#[derive(Debug, Clone)]
+pub struct QueueConfig {
+    pub max_delivery_count: u32,
+    pub dlq_name: Option<String>,
+    pub message_ttl_secs: Option<u64>,
+    pub priority_enabled: bool,
+}
+
+impl Default for QueueConfig {
+    fn default() -> Self {
+        Self {
+            max_delivery_count: 3,
+            dlq_name: None,
+            message_ttl_secs: None,
+            priority_enabled: false,
+        }
+    }
+}
+
 pub struct SyncQueue {
     name: String,
     engine: Arc<RwLock<KvEngine>>,
+    config: QueueConfig,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -21,7 +41,31 @@ impl SyncQueue {
         Self {
             name: name.to_string(),
             engine,
+            config: QueueConfig::default(),
         }
+    }
+
+    pub fn with_config(name: &str, engine: Arc<RwLock<KvEngine>>, config: QueueConfig) -> Self {
+        Self {
+            name: name.to_string(),
+            engine,
+            config,
+        }
+    }
+
+    pub fn config(&self) -> &QueueConfig {
+        &self.config
+    }
+
+    pub fn set_config(&mut self, config: QueueConfig) {
+        self.config = config;
+    }
+
+    fn now_millis() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
     }
 
     pub fn enqueue(&mut self, payload: Vec<u8>, visibility_timeout: u64) -> Result<String> {
@@ -49,12 +93,86 @@ impl SyncQueue {
         Ok(msg_id)
     }
 
+    pub fn enqueue_at(&mut self, payload: Vec<u8>, visibility_timeout: u64, deliver_at: u64) -> Result<String> {
+        let mut msg = SyncQueueMessage::new(payload, visibility_timeout);
+        msg.visible_after = deliver_at;
+        let msg_id = msg.id.clone();
+
+        let msg_json = serde_json::to_vec(&msg)?;
+        let msg_key = format!("queue:{}:msg:{}", self.name, msg_id);
+        {
+            let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+            guard.put(1, msg_key.as_bytes(), &msg_json).map_err(MsgqError::Db)?;
+        }
+
+        let mut index = self.read_index()?;
+        index.push(msg_id.clone());
+        let index_key = format!("queue:{}:index", self.name);
+        let index_json = serde_json::to_vec(&index)?;
+        {
+            let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+            guard.put(1, index_key.as_bytes(), &index_json).map_err(MsgqError::Db)?;
+        }
+
+        self.update_meta(|m| m.total_enqueued += 1)?;
+
+        Ok(msg_id)
+    }
+
+    pub fn enqueue_delay(&mut self, payload: Vec<u8>, visibility_timeout: u64, delay_secs: u64) -> Result<String> {
+        let deliver_at = Self::now_millis() + delay_secs * 1000;
+        self.enqueue_at(payload, visibility_timeout, deliver_at)
+    }
+
+    pub fn enqueue_priority(&mut self, payload: Vec<u8>, priority: u8) -> Result<String> {
+        if !self.config.priority_enabled {
+            return Err(MsgqError::InvalidOperation("priority queue not enabled".into()));
+        }
+
+        let mut msg = SyncQueueMessage::new(payload, 0);
+        msg.priority = priority;
+        let msg_id = msg.id.clone();
+
+        let msg_json = serde_json::to_vec(&msg)?;
+        let msg_key = format!("queue:{}:msg:{}", self.name, msg_id);
+        {
+            let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+            guard.put(1, msg_key.as_bytes(), &msg_json).map_err(MsgqError::Db)?;
+        }
+
+        let mut pindex = self.read_priority_index()?;
+        pindex.push((priority, msg_id.clone()));
+        pindex.sort_by(|a, b| b.0.cmp(&a.0));
+        let pindex_key = format!("queue:{}:pindex", self.name);
+        let pindex_json = serde_json::to_vec(&pindex)?;
+        {
+            let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+            guard.put(1, pindex_key.as_bytes(), &pindex_json).map_err(MsgqError::Db)?;
+        }
+
+        self.update_meta(|m| m.total_enqueued += 1)?;
+
+        Ok(msg_id)
+    }
+
+    pub fn batch_enqueue(&mut self, payloads: Vec<Vec<u8>>, visibility_timeout: u64) -> Result<Vec<String>> {
+        let mut ids = Vec::new();
+        for payload in payloads {
+            let id = self.enqueue(payload, visibility_timeout)?;
+            ids.push(id);
+        }
+        Ok(ids)
+    }
+
     pub fn dequeue(&mut self, wait_timeout_secs: u64) -> Result<Option<SyncQueueMessage>> {
+        if self.config.priority_enabled {
+            if let Some(msg) = self.dequeue_priority()? {
+                return Ok(Some(msg));
+            }
+        }
+
         let index = self.read_index()?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let now = Self::now_millis();
 
         for msg_id in &index {
             let msg_key = format!("queue:{}:msg:{}", self.name, msg_id);
@@ -67,18 +185,20 @@ impl SyncQueue {
                 if let Ok(mut msg) = serde_json::from_slice::<SyncQueueMessage>(&data) {
                     if msg.is_visible() {
                         let in_flight = self.is_inflight(msg_id)?;
-                        // If in flight and timeout not expired, skip
                         if in_flight {
-                            // Check if timeout expired - if so, remove from inflight
-                            let now = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_millis() as u64;
+                            let now = Self::now_millis();
                             if msg.visible_after > now {
-                                continue; // still in timeout, skip
+                                continue;
                             }
-                            // timeout expired, remove from inflight
                             self.remove_inflight(msg_id)?;
+                        }
+
+                        if self.config.dlq_name.is_some() 
+                            && msg.delivery_count >= self.config.max_delivery_count {
+                            self.move_to_dlq(msg.clone())?;
+                            self.remove_from_index(msg_id)?;
+                            self.remove_inflight(msg_id)?;
+                            continue;
                         }
 
                         self.add_inflight(msg_id)?;
@@ -104,6 +224,46 @@ impl SyncQueue {
         Ok(None)
     }
 
+    fn dequeue_priority(&mut self) -> Result<Option<SyncQueueMessage>> {
+        let pindex = self.read_priority_index()?;
+        let now = Self::now_millis();
+
+        for (_, msg_id) in &pindex {
+            let msg_key = format!("queue:{}:msg:{}", self.name, msg_id);
+            let data_opt = {
+                let guard = self.engine.read().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+                guard.get(1, msg_key.as_bytes()).map_err(MsgqError::Db)?
+            };
+
+            if let Some(data) = data_opt {
+                if let Ok(mut msg) = serde_json::from_slice::<SyncQueueMessage>(&data) {
+                    if msg.is_visible() {
+                        let in_flight = self.is_inflight(msg_id)?;
+                        if in_flight {
+                            let now = Self::now_millis();
+                            if msg.visible_after > now {
+                                continue;
+                            }
+                            self.remove_inflight(msg_id)?;
+                        }
+
+                        self.add_inflight(msg_id)?;
+
+                        msg.visible_after = now + msg.visibility_timeout * 1000;
+
+                        let updated_json = serde_json::to_vec(&msg)?;
+                        let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+                        guard.put(1, msg_key.as_bytes(), &updated_json).map_err(MsgqError::Db)?;
+
+                        return Ok(Some(msg));
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     pub fn ack(&mut self, msg_id: &str) -> Result<()> {
         let msg_key = format!("queue:{}:msg:{}", self.name, msg_id);
 
@@ -115,6 +275,7 @@ impl SyncQueue {
         }
 
         self.remove_from_index(msg_id)?;
+        self.remove_from_priority_index(msg_id)?;
         self.remove_inflight(msg_id)?;
         {
             let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
@@ -180,6 +341,96 @@ impl SyncQueue {
         Ok(index.len())
     }
 
+    pub fn priority_length(&self) -> Result<usize> {
+        let pindex = self.read_priority_index()?;
+        Ok(pindex.len())
+    }
+
+    pub fn cleanup_expired(&mut self) -> Result<usize> {
+        let ttl = match self.config.message_ttl_secs {
+            Some(ttl) => ttl * 1000,
+            None => return Ok(0),
+        };
+
+        let now = Self::now_millis();
+        let mut removed = 0;
+
+        let index = self.read_index()?;
+        let mut updated_index = index.clone();
+
+        for msg_id in &index {
+            let msg_key = format!("queue:{}:msg:{}", self.name, msg_id);
+            let data_opt = {
+                let guard = self.engine.read().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+                guard.get(1, msg_key.as_bytes()).map_err(MsgqError::Db)?
+            };
+
+            if let Some(data) = data_opt {
+                if let Ok(msg) = serde_json::from_slice::<SyncQueueMessage>(&data) {
+                    if now - msg.enqueued_at > ttl {
+                        {
+                            let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+                            guard.delete(1, msg_key.as_bytes()).map_err(MsgqError::Db)?;
+                        }
+                        updated_index.retain(|id| id != msg_id);
+                        removed += 1;
+                    }
+                }
+            }
+        }
+
+        if removed > 0 {
+            let index_key = format!("queue:{}:index", self.name);
+            let index_json = serde_json::to_vec(&updated_index)?;
+            {
+                let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+                guard.put(1, index_key.as_bytes(), &index_json).map_err(MsgqError::Db)?;
+            }
+        }
+
+        Ok(removed)
+    }
+
+    pub fn dlq_length(&self) -> Result<usize> {
+        let dlq_name = match &self.config.dlq_name {
+            Some(name) => name,
+            None => return Ok(0),
+        };
+
+        let start_key = format!("queue:{}:dlq:", dlq_name);
+        let end_key = format!("queue:{}:dlq;", dlq_name);
+
+        let guard = self.engine.read().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+        let results = guard.scan(1, start_key.as_bytes(), end_key.as_bytes()).map_err(MsgqError::Db)?;
+        Ok(results.len())
+    }
+
+    pub fn purge_dlq(&mut self) -> Result<usize> {
+        let dlq_name = match &self.config.dlq_name {
+            Some(name) => name,
+            None => return Err(MsgqError::InvalidOperation("DLQ not configured".into())),
+        };
+
+        let start_key = format!("queue:{}:dlq:", dlq_name);
+        let end_key = format!("queue:{}:dlq;", dlq_name);
+
+        let results = {
+            let guard = self.engine.read().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+            guard.scan(1, start_key.as_bytes(), end_key.as_bytes()).map_err(MsgqError::Db)?
+        };
+
+        let mut removed = 0;
+        {
+            let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+            for (key, _) in results {
+                guard.delete(1, &key).map_err(MsgqError::Db)?;
+                removed += 1;
+            }
+        }
+
+        Ok(removed)
+    }
+
     pub fn purge(&mut self) -> Result<()> {
         let index = self.read_index()?;
 
@@ -211,6 +462,43 @@ impl SyncQueue {
             }
         }
         Ok(vec![])
+    }
+
+    fn read_priority_index(&self) -> Result<Vec<(u8, String)>> {
+        let pindex_key = format!("queue:{}:pindex", self.name);
+        {
+            let guard = self.engine.read().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+            if let Ok(Some(data)) = guard.get(1, pindex_key.as_bytes()) {
+                return Ok(serde_json::from_slice(&data)?);
+            }
+        }
+        Ok(vec![])
+    }
+
+    fn remove_from_priority_index(&mut self, msg_id: &str) -> Result<()> {
+        let pindex_key = format!("queue:{}:pindex", self.name);
+        let mut pindex = self.read_priority_index()?;
+        pindex.retain(|(_, id)| id != msg_id);
+        let pindex_json = serde_json::to_vec(&pindex)?;
+        {
+            let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+            guard.put(1, pindex_key.as_bytes(), &pindex_json).map_err(MsgqError::Db)?;
+        }
+        Ok(())
+    }
+
+    fn move_to_dlq(&mut self, msg: SyncQueueMessage) -> Result<()> {
+        let dlq_name = self.config.dlq_name.as_ref()
+            .ok_or_else(|| MsgqError::InvalidOperation("DLQ not configured".into()))?;
+
+        let dlq_key = format!("queue:{}:dlq:{}", dlq_name, msg.id);
+        let msg_json = serde_json::to_vec(&msg)?;
+        {
+            let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+            guard.put(1, dlq_key.as_bytes(), &msg_json).map_err(MsgqError::Db)?;
+        }
+
+        Ok(())
     }
 
     fn remove_from_index(&mut self, msg_id: &str) -> Result<()> {

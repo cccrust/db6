@@ -9,9 +9,9 @@ mod async_pubsub;
 
 pub use error::{MsgqError, Result};
 pub use message::SyncQueueMessage;
-pub use sync_queue::{SyncQueue, QueueMeta};
+pub use sync_queue::{SyncQueue, QueueMeta, QueueConfig};
 pub use sync_pubsub::{SyncPubSub, SyncPubSubMessage};
-pub use async_queue::{AsyncQueue, AsyncQueueMessage, AsyncMsgq};
+pub use async_queue::{AsyncQueue, AsyncQueueMessage, AsyncMsgq, AsyncQueueConfig};
 pub use async_pubsub::{AsyncPubSub, AsyncPubSubMessage};
 
 use crate::kv::{KvEngine, KvStore};

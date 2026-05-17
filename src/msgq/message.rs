@@ -10,6 +10,7 @@ pub struct SyncQueueMessage {
     pub delivery_count: u32,
     pub visibility_timeout: u64,
     pub visible_after: u64,
+    pub priority: u8,
     pub metadata: Option<String>,
 }
 
@@ -29,6 +30,7 @@ impl SyncQueueMessage {
             delivery_count: 0,
             visibility_timeout,
             visible_after: 0,
+            priority: 0,
             metadata: None,
         }
     }

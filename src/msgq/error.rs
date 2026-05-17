@@ -23,6 +23,9 @@ pub enum MsgqError {
     #[error("Invalid engine type: {0}")]
     InvalidEngine(String),
 
+    #[error("Invalid operation: {0}")]
+    InvalidOperation(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
