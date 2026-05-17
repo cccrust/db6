@@ -46,6 +46,7 @@ name = "db6"
 version = "3.13.0"
 dependencies = [
  "bincode",
+ "fastrand",
  "memmap2",
  "serde",
  "serde_json",
