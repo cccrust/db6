@@ -10,9 +10,9 @@ mod async_pubsub;
 pub use error::{MsgqError, Result};
 pub use message::SyncQueueMessage;
 pub use sync_queue::{SyncQueue, QueueMeta, QueueConfig};
-pub use sync_pubsub::{SyncPubSub, SyncPubSubMessage};
+pub use sync_pubsub::{SyncPubSub, SyncPubSubMessage, PubSubConfig, TopicMatcher};
 pub use async_queue::{AsyncQueue, AsyncQueueMessage, AsyncMsgq, AsyncQueueConfig};
-pub use async_pubsub::{AsyncPubSub, AsyncPubSubMessage};
+pub use async_pubsub::{AsyncPubSub, AsyncPubSubMessage, AsyncPatternSubscriber};
 
 use crate::kv::{KvEngine, KvStore};
 use std::path::Path;

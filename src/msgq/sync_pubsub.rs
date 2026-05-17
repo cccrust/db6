@@ -39,14 +39,88 @@ struct ChannelMessages {
     messages: Vec<SyncPubSubMessage>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PubSubConfig {
+    pub max_history: usize,
+    pub history_enabled: bool,
+    pub pattern_matching: bool,
+}
+
+impl Default for PubSubConfig {
+    fn default() -> Self {
+        Self {
+            max_history: 100,
+            history_enabled: true,
+            pattern_matching: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TopicMatcher {
+    segments: Vec<Option<String>>,
+}
+
+impl TopicMatcher {
+    pub fn new(pattern: &str) -> Self {
+        let segments: Vec<Option<String>> = pattern
+            .split('.')
+            .map(|s| {
+                if s == "*" || s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
+            })
+            .collect();
+        Self { segments }
+    }
+
+    pub fn matches(&self, topic: &str) -> bool {
+        let parts: Vec<&str> = topic.split('.').collect();
+        if parts.len() != self.segments.len() {
+            return false;
+        }
+        for (i, seg) in self.segments.iter().enumerate() {
+            if let Some(ref pattern) = seg {
+                if parts[i] != pattern {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
 pub struct SyncPubSub {
     name: String,
     engine: Arc<RwLock<KvEngine>>,
+    config: PubSubConfig,
 }
 
 impl SyncPubSub {
     pub fn new(name: &str, engine: Arc<RwLock<KvEngine>>) -> Self {
-        Self { name: name.to_string(), engine }
+        Self {
+            name: name.to_string(),
+            engine,
+            config: PubSubConfig::default(),
+        }
+    }
+
+    pub fn with_config(name: &str, engine: Arc<RwLock<KvEngine>>, config: PubSubConfig) -> Self {
+        Self {
+            name: name.to_string(),
+            engine,
+            config,
+        }
+    }
+
+    pub fn config(&self) -> &PubSubConfig {
+        &self.config
+    }
+
+    pub fn set_config(&mut self, config: PubSubConfig) {
+        self.config = config;
     }
 
     pub fn publish(&mut self, channel: &str, payload: Vec<u8>) -> Result<String> {
@@ -68,6 +142,130 @@ impl SyncPubSub {
         }
 
         Ok(msg_id)
+    }
+
+    pub fn publish_to_topic(&mut self, topic: &str, payload: Vec<u8>) -> Result<String> {
+        self.publish(topic, payload)
+    }
+
+    pub fn subscribe_topic(&mut self, topic_pattern: &str, subscriber_id: &str) -> Result<()> {
+        if !self.config.pattern_matching {
+            return Err(MsgqError::InvalidOperation("pattern matching not enabled".into()));
+        }
+        self.subscribe(topic_pattern, subscriber_id)
+    }
+
+    pub fn subscribe_pattern(&mut self, pattern: &str, subscriber_id: &str) -> Result<()> {
+        if !self.config.pattern_matching {
+            return Err(MsgqError::InvalidOperation("pattern matching not enabled".into()));
+        }
+
+        let mut patterns = self.get_patterns()?;
+        if !patterns.contains(&pattern.to_string()) {
+            patterns.push(pattern.to_string());
+        }
+
+        let key = format!("pubsub:{}:patterns", self.name);
+        let json = serde_json::to_vec(&patterns)?;
+        {
+            let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+            guard.put(1, key.as_bytes(), &json).map_err(MsgqError::Db)?;
+        }
+
+        let offset_key = format!("pubsub:{}:pattern_offset:{}:{}", self.name, pattern, subscriber_id);
+        {
+            let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+            guard.put(1, offset_key.as_bytes(), b"0").map_err(MsgqError::Db)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn consume_pattern(&mut self, pattern: &str, subscriber_id: &str) -> Result<Option<SyncPubSubMessage>> {
+        if !self.config.pattern_matching {
+            return Err(MsgqError::InvalidOperation("pattern matching not enabled".into()));
+        }
+
+        let offset_key = format!("pubsub:{}:pattern_offset:{}:{}", self.name, pattern, subscriber_id);
+        let offset = {
+            let guard = self.engine.read().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+            if let Ok(Some(data)) = guard.get(1, offset_key.as_bytes()) {
+                let offset_str = String::from_utf8_lossy(&data);
+                offset_str.parse().unwrap_or(0)
+            } else {
+                0
+            }
+        };
+
+        let channels = self.list_channels()?;
+
+        for channel in channels {
+            let matcher = TopicMatcher::new(pattern);
+            if !matcher.matches(&channel) {
+                continue;
+            }
+
+            let channel_messages = self.get_channel_messages(&channel)?;
+            if offset < channel_messages.messages.len() {
+                let msg = channel_messages.messages[offset].clone();
+
+                let new_offset = offset + 1;
+                {
+                    let mut guard = self.engine.write().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+                    guard.put(1, offset_key.as_bytes(), new_offset.to_string().as_bytes()).map_err(MsgqError::Db)?;
+                }
+
+                return Ok(Some(msg));
+            }
+        }
+
+        Ok(None)
+    }
+
+    pub fn list_patterns(&self) -> Result<Vec<String>> {
+        self.get_patterns()
+    }
+
+    pub fn subscribe_with_history(
+        &mut self,
+        channel: &str,
+        subscriber_id: &str,
+        history_count: usize,
+    ) -> Result<Vec<SyncPubSubMessage>> {
+        self.subscribe(channel, subscriber_id)?;
+
+        if !self.config.history_enabled {
+            return Ok(vec![]);
+        }
+
+        self.get_history(channel, history_count)
+    }
+
+    pub fn get_history(&self, channel: &str, count: usize) -> Result<Vec<SyncPubSubMessage>> {
+        if !self.config.history_enabled {
+            return Ok(vec![]);
+        }
+
+        let channel_messages = self.get_channel_messages(channel)?;
+        let max_count = count.min(self.config.max_history);
+        let start = channel_messages.messages.len().saturating_sub(max_count);
+
+        Ok(channel_messages.messages[start..].to_vec())
+    }
+
+    pub fn set_max_history(&mut self, max: usize) {
+        self.config.max_history = max;
+    }
+
+    fn get_patterns(&self) -> Result<Vec<String>> {
+        let key = format!("pubsub:{}:patterns", self.name);
+        {
+            let guard = self.engine.read().map_err(|_| MsgqError::InvalidEngine("lock poisoned".into()))?;
+            if let Ok(Some(data)) = guard.get(1, key.as_bytes()) {
+                return Ok(serde_json::from_slice(&data).unwrap_or_default());
+            }
+        }
+        Ok(vec![])
     }
 
     pub fn subscribe(&mut self, channel: &str, subscriber_id: &str) -> Result<()> {
