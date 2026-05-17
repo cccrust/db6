@@ -246,18 +246,25 @@ impl Executor {
     fn execute_insert(&mut self, insert: &crate::sql::parser::ast::InsertStmt) -> Result<ResultSet> {
         let table = &insert.table;
 
+        let eval_lit = |expr: &crate::sql::parser::ast::Expr| -> String {
+            match expr {
+                crate::sql::parser::ast::Expr::LitStr(s) => s.clone(),
+                crate::sql::parser::ast::Expr::LitInt(i) => i.to_string(),
+                crate::sql::parser::ast::Expr::LitFloat(f) => f.to_string(),
+                crate::sql::parser::ast::Expr::LitNull => String::new(),
+                _ => "".to_string(),
+            }
+        };
+
         let mut affected = 0;
         for row in &insert.values {
-            if let Some(expr) = row.first() {
-                let value = match expr {
-                    crate::sql::parser::ast::Expr::LitStr(s) => s.clone(),
-                    crate::sql::parser::ast::Expr::LitInt(i) => i.to_string(),
-                    crate::sql::parser::ast::Expr::LitFloat(f) => f.to_string(),
-                    crate::sql::parser::ast::Expr::LitNull => String::new(),
-                    _ => "".to_string(),
+            if !row.is_empty() {
+                let (key, value) = if row.len() >= 2 {
+                    (eval_lit(&row[0]), eval_lit(&row[1]))
+                } else {
+                    let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+                    (format!("{}:{}", table, id), eval_lit(&row[0]))
                 };
-                let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-                let key = format!("{}:{}", table, id);
                 self.engine.put(1, key.as_bytes(), value.as_bytes())?;
                 affected += 1;
             }
@@ -364,6 +371,20 @@ mod tests {
 
         let result = exec.execute("SELECT * FROM users WHERE @.phone IS NULL").unwrap();
         assert_eq!(result.rows.len(), 1, "Should have 1 user without phone");
+    }
+
+    #[test]
+    fn test_executor_insert_two_values() {
+        let engine = crate::engine::BTreeMemoryEngine::new();
+        let mut exec = Executor::new(Box::new(engine));
+
+        exec.execute("INSERT INTO test VALUES ('key1', '{\"name\":\"Alice\",\"age\":30}')").unwrap();
+        exec.execute("INSERT INTO test VALUES ('key2', '{\"name\":\"Bob\",\"age\":25}')").unwrap();
+
+        let result = exec.execute("SELECT * FROM test").unwrap();
+        assert_eq!(result.rows.len(), 2, "Should have 2 rows");
+        assert!(result.rows[0][1].contains("Alice"), "First row should contain Alice JSON");
+        assert!(result.rows[1][1].contains("Bob"), "Second row should contain Bob JSON");
     }
 
     #[test]
@@ -497,18 +518,25 @@ impl<E: crate::engine::StorageEngine> SqlExecutor<E> {
     fn execute_insert(&mut self, insert: &crate::sql::parser::ast::InsertStmt) -> Result<ResultSet> {
         let table = &insert.table;
 
+        let eval_lit = |expr: &crate::sql::parser::ast::Expr| -> String {
+            match expr {
+                crate::sql::parser::ast::Expr::LitStr(s) => s.clone(),
+                crate::sql::parser::ast::Expr::LitInt(i) => i.to_string(),
+                crate::sql::parser::ast::Expr::LitFloat(f) => f.to_string(),
+                crate::sql::parser::ast::Expr::LitNull => String::new(),
+                _ => "".to_string(),
+            }
+        };
+
         let mut affected = 0;
         for row in &insert.values {
-            if let Some(expr) = row.first() {
-                let value = match expr {
-                    crate::sql::parser::ast::Expr::LitStr(s) => s.clone(),
-                    crate::sql::parser::ast::Expr::LitInt(i) => i.to_string(),
-                    crate::sql::parser::ast::Expr::LitFloat(f) => f.to_string(),
-                    crate::sql::parser::ast::Expr::LitNull => String::new(),
-                    _ => "".to_string(),
+            if !row.is_empty() {
+                let (key, value) = if row.len() >= 2 {
+                    (eval_lit(&row[0]), eval_lit(&row[1]))
+                } else {
+                    let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+                    (format!("{}:{}", table, id), eval_lit(&row[0]))
                 };
-                let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-                let key = format!("{}:{}", table, id);
                 self.engine.put(1, key.as_bytes(), value.as_bytes())?;
                 affected += 1;
             }
