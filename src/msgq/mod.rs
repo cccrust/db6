@@ -53,6 +53,10 @@ impl Msgq {
         SyncPubSub::new("default", self.engine.clone())
     }
 
+    pub fn async_pubsub(&self) -> AsyncPubSub {
+        AsyncPubSub::new(self.engine.clone())
+    }
+
     pub fn list_queues(&self) -> Result<Vec<String>> {
         let start = b"queue:";
         let end = b"queue;";
