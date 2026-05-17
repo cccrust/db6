@@ -44,6 +44,7 @@ pub struct PubSubConfig {
     pub max_history: usize,
     pub history_enabled: bool,
     pub pattern_matching: bool,
+    pub channel_capacity: usize,
 }
 
 impl Default for PubSubConfig {
@@ -52,6 +53,7 @@ impl Default for PubSubConfig {
             max_history: 100,
             history_enabled: true,
             pattern_matching: true,
+            channel_capacity: 1024,
         }
     }
 }

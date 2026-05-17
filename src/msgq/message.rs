@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncQueueMessage {
     pub id: String,
+    #[serde(with = "serde_bytes")]
     pub payload: Vec<u8>,
     pub enqueued_at: u64,
     pub delivery_count: u32,

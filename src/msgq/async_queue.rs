@@ -1,13 +1,19 @@
 //! Async Queue Implementation using tokio channels
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
+use tokio::sync::Notify;
+use std::collections::BTreeSet;
+use std::sync::Mutex;
+use tokio::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AsyncQueueMessage {
     pub id: String,
+    #[serde(with = "serde_bytes")]
     pub payload: Vec<u8>,
     pub enqueued_at: u64,
     pub visibility_timeout: u64,

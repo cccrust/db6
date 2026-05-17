@@ -3,11 +3,12 @@
 //! This implementation uses tokio's broadcast channels for efficient
 //! real-time message distribution, similar to mini-redis.
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::sync::broadcast;
+use tokio::sync::RwLock;
 
 pub use crate::msgq::sync_pubsub::{PubSubConfig, TopicMatcher};
 
@@ -15,6 +16,7 @@ pub use crate::msgq::sync_pubsub::{PubSubConfig, TopicMatcher};
 pub struct AsyncPubSubMessage {
     pub id: String,
     pub channel: String,
+    #[serde(with = "serde_bytes")]
     pub payload: Vec<u8>,
     pub timestamp: u64,
 }
@@ -95,7 +97,7 @@ impl AsyncPubSub {
         if let Some(sender) = channels.get(channel) {
             let _ = sender.send(msg.clone());
         } else {
-            let (tx, _rx) = broadcast::channel(1024);
+            let (tx, _rx) = broadcast::channel(self.config.channel_capacity);
             let _ = tx.send(msg.clone());
             channels.insert(channel.to_string(), tx);
         }
@@ -123,7 +125,7 @@ impl AsyncPubSub {
         let sender = if let Some(existing) = channels.get(channel) {
             existing.clone()
         } else {
-            let (tx, _rx) = broadcast::channel(1024);
+            let (tx, _rx) = broadcast::channel(self.config.channel_capacity);
             channels.insert(channel.to_string(), tx.clone());
             tx
         };
