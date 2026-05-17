@@ -1,10 +1,10 @@
-//! Queue Implementation
+//! Sync Queue Implementation
 
 use crate::kv::{KvEngine, KvStore};
-use crate::msgq::{error::*, message::Message};
+use crate::msgq::{error::*, message::SyncQueueMessage};
 use std::sync::{Arc, RwLock};
 
-pub struct Queue {
+pub struct SyncQueue {
     name: String,
     engine: Arc<RwLock<KvEngine>>,
 }
@@ -16,7 +16,7 @@ pub struct QueueMeta {
     pub nacked: u64,
 }
 
-impl Queue {
+impl SyncQueue {
     pub fn new(name: &str, engine: Arc<RwLock<KvEngine>>) -> Self {
         Self {
             name: name.to_string(),
@@ -25,7 +25,7 @@ impl Queue {
     }
 
     pub fn enqueue(&mut self, payload: Vec<u8>, visibility_timeout: u64) -> Result<String> {
-        let mut msg = Message::new(payload, visibility_timeout);
+        let mut msg = SyncQueueMessage::new(payload, visibility_timeout);
         let msg_id = msg.id.clone();
 
         let msg_json = serde_json::to_vec(&msg)?;
@@ -49,7 +49,7 @@ impl Queue {
         Ok(msg_id)
     }
 
-    pub fn dequeue(&mut self, wait_timeout_secs: u64) -> Result<Option<Message>> {
+    pub fn dequeue(&mut self, wait_timeout_secs: u64) -> Result<Option<SyncQueueMessage>> {
         let index = self.read_index()?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -64,7 +64,7 @@ impl Queue {
             };
 
             if let Some(data) = data_opt {
-                if let Ok(mut msg) = serde_json::from_slice::<Message>(&data) {
+                if let Ok(mut msg) = serde_json::from_slice::<SyncQueueMessage>(&data) {
                     if msg.is_visible() {
                         let in_flight = self.is_inflight(msg_id)?;
                         // If in flight and timeout not expired, skip
@@ -134,7 +134,7 @@ impl Queue {
                 .ok_or_else(|| MsgqError::MessageNotFound(msg_id.to_string()))?
         };
 
-        let mut msg: Message = serde_json::from_slice(&data)?;
+        let mut msg: SyncQueueMessage = serde_json::from_slice(&data)?;
 
         self.remove_inflight(msg_id)?;
 
@@ -154,7 +154,7 @@ impl Queue {
         Ok(())
     }
 
-    pub fn peek(&self) -> Result<Option<Message>> {
+    pub fn peek(&self) -> Result<Option<SyncQueueMessage>> {
         let index = self.read_index()?;
 
         for msg_id in &index {
@@ -164,7 +164,7 @@ impl Queue {
                 guard.get(1, msg_key.as_bytes()).map_err(MsgqError::Db)?
             };
             if let Some(data) = data_opt {
-                if let Ok(msg) = serde_json::from_slice::<Message>(&data) {
+                if let Ok(msg) = serde_json::from_slice::<SyncQueueMessage>(&data) {
                     if msg.is_visible() {
                         return Ok(Some(msg));
                     }

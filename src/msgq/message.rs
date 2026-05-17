@@ -1,9 +1,9 @@
-//! Message Structure
+//! Sync Queue Message Structure
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
+pub struct SyncQueueMessage {
     pub id: String,
     pub payload: Vec<u8>,
     pub enqueued_at: u64,
@@ -13,7 +13,7 @@ pub struct Message {
     pub metadata: Option<String>,
 }
 
-impl Message {
+impl SyncQueueMessage {
     pub fn new(payload: Vec<u8>, visibility_timeout: u64) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

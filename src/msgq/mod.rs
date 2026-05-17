@@ -2,11 +2,17 @@
 
 mod error;
 mod message;
-mod queue;
+mod sync_queue;
+mod sync_pubsub;
+mod async_queue;
+mod async_pubsub;
 
 pub use error::{MsgqError, Result};
-pub use message::Message;
-pub use queue::Queue;
+pub use message::SyncQueueMessage;
+pub use sync_queue::{SyncQueue, QueueMeta};
+pub use sync_pubsub::{SyncPubSub, SyncPubSubMessage};
+pub use async_queue::{AsyncQueue, AsyncQueueMessage, AsyncMsgq};
+pub use async_pubsub::{AsyncPubSub, AsyncPubSubMessage};
 
 use crate::kv::{KvEngine, KvStore};
 use std::path::Path;
@@ -33,8 +39,16 @@ impl Msgq {
         })
     }
 
-    pub fn queue(&self, name: &str) -> Queue {
-        Queue::new(name, self.engine.clone())
+    pub fn queue(&self, name: &str) -> SyncQueue {
+        SyncQueue::new(name, self.engine.clone())
+    }
+
+    pub fn async_queue(&self, name: &str) -> AsyncQueue {
+        AsyncQueue::new(name)
+    }
+
+    pub fn pubsub(&self) -> SyncPubSub {
+        SyncPubSub::new("default", self.engine.clone())
     }
 
     pub fn list_queues(&self) -> Result<Vec<String>> {
@@ -202,5 +216,108 @@ mod tests {
         assert_eq!(peeked.payload, b"msg1");
 
         assert_eq!(queue.length().unwrap(), 2);
+    }
+}
+
+#[cfg(test)]
+mod pubsub_tests {
+    use super::*;
+
+    #[test]
+    fn test_pubsub_basic() {
+        let msgq = Msgq::new("memory").unwrap();
+        let mut ps = msgq.pubsub();
+
+        ps.subscribe("news", "reader1").unwrap();
+        ps.subscribe("news", "reader2").unwrap();
+
+        let id = ps.publish("news", b"Breaking news!".to_vec()).unwrap();
+        assert!(!id.is_empty());
+
+        let msg1 = ps.consume("news", "reader1").unwrap().unwrap();
+        let msg2 = ps.consume("news", "reader2").unwrap().unwrap();
+
+        assert_eq!(msg1.payload, b"Breaking news!");
+        assert_eq!(msg2.payload, b"Breaking news!");
+        assert_eq!(msg1.id, msg2.id);
+    }
+
+    #[test]
+    fn test_pubsub_offset_tracking() {
+        let msgq = Msgq::new("memory").unwrap();
+        let mut ps = msgq.pubsub();
+
+        ps.subscribe("ch", "sub").unwrap();
+
+        ps.publish("ch", b"msg1".to_vec()).unwrap();
+        ps.publish("ch", b"msg2".to_vec()).unwrap();
+
+        let m1 = ps.consume("ch", "sub").unwrap().unwrap();
+        assert_eq!(m1.payload, b"msg1");
+
+        let m2 = ps.consume("ch", "sub").unwrap().unwrap();
+        assert_eq!(m2.payload, b"msg2");
+
+        let m3 = ps.consume("ch", "sub").unwrap();
+        assert!(m3.is_none());
+    }
+
+    #[test]
+    fn test_pubsub_unsubscribe() {
+        let msgq = Msgq::new("memory").unwrap();
+        let mut ps = msgq.pubsub();
+
+        ps.subscribe("ch", "sub").unwrap();
+        ps.publish("ch", b"msg".to_vec()).unwrap();
+
+        assert!(ps.consume("ch", "sub").unwrap().is_some());
+
+        ps.unsubscribe("ch", "sub").unwrap();
+
+        ps.subscribe("ch", "sub").unwrap();
+        let msg = ps.consume("ch", "sub").unwrap().unwrap();
+        assert_eq!(msg.payload, b"msg");
+    }
+
+    #[test]
+    fn test_pubsub_list_channels() {
+        let msgq = Msgq::new("memory").unwrap();
+        let mut ps = msgq.pubsub();
+
+        ps.subscribe("ch1", "sub").unwrap();
+        ps.publish("ch2", b"msg".to_vec()).unwrap();
+
+        let channels = ps.list_channels().unwrap();
+        assert!(channels.iter().any(|c| c == "ch1"));
+        assert!(channels.iter().any(|c| c == "ch2"));
+    }
+
+    #[test]
+    fn test_pubsub_message_count() {
+        let msgq = Msgq::new("memory").unwrap();
+        let mut ps = msgq.pubsub();
+
+        ps.publish("ch", b"msg1".to_vec()).unwrap();
+        ps.publish("ch", b"msg2".to_vec()).unwrap();
+
+        assert_eq!(ps.message_count("ch").unwrap(), 2);
+    }
+
+    #[test]
+    fn test_pubsub_multiple_channels() {
+        let msgq = Msgq::new("memory").unwrap();
+        let mut ps = msgq.pubsub();
+
+        ps.subscribe("channel_a", "sub1").unwrap();
+        ps.subscribe("channel_b", "sub1").unwrap();
+
+        ps.publish("channel_a", b"msg for a".to_vec()).unwrap();
+        ps.publish("channel_b", b"msg for b".to_vec()).unwrap();
+
+        let msg_a = ps.consume("channel_a", "sub1").unwrap().unwrap();
+        let msg_b = ps.consume("channel_b", "sub1").unwrap().unwrap();
+
+        assert_eq!(msg_a.payload, b"msg for a");
+        assert_eq!(msg_b.payload, b"msg for b");
     }
 }

@@ -24,4 +24,4 @@ pub use query::Db;
 pub use error::{Error, Result};
 pub use fts::{FtsIndex, FtsTokenizer, CjkTokenizer, EnglishTokenizer};
 pub use sql::{parse, Executor, ResultSet, SqlExecutor};
-pub use msgq::{Msgq, Queue, Message, QueueStats};
+pub use msgq::{Msgq, SyncQueue, QueueMeta, SyncQueueMessage, QueueStats, SyncPubSub, SyncPubSubMessage, AsyncQueue, AsyncQueueMessage, AsyncMsgq, AsyncPubSub, AsyncPubSubMessage};
