@@ -13,27 +13,27 @@ use db6::{KvApi, StorageEngine};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PutRequest {
     pub table_id: u32,
-    pub key: Vec<u8>,
-    pub value: Vec<u8>,
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GetRequest {
     pub table_id: u32,
-    pub key: Vec<u8>,
+    pub key: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GetResponse {
-    pub value: Option<Vec<u8>>,
+    pub value: Option<String>,
     pub found: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ScanRequest {
     pub table_id: u32,
-    pub start: Vec<u8>,
-    pub end: Vec<u8>,
+    pub start: String,
+    pub end: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -43,14 +43,14 @@ pub struct ScanResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KvPair {
-    pub key: Vec<u8>,
-    pub value: Vec<u8>,
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeleteRequest {
     pub table_id: u32,
-    pub key: Vec<u8>,
+    pub key: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -78,36 +78,41 @@ struct AppState {
 
 async fn put(State(state): State<AppState>, Json(req): Json<PutRequest>) -> Json<StatusResponse> {
     let mut engine = state.engine.write().unwrap();
-    KvApi::put(&mut *engine, req.table_id, &req.key, &req.value).unwrap();
+    KvApi::put(&mut *engine, req.table_id, req.key.as_bytes(), req.value.as_bytes()).unwrap();
     Json(StatusResponse { status: "ok".to_string() })
 }
 
 async fn get(State(state): State<AppState>, Json(req): Json<GetRequest>) -> Json<GetResponse> {
     let mut engine = state.engine.write().unwrap();
-    let value = KvApi::get(&mut *engine, req.table_id, &req.key).unwrap();
+    let value = KvApi::get(&mut *engine, req.table_id, req.key.as_bytes()).unwrap();
     Json(GetResponse {
         found: value.is_some(),
-        value,
+        value: value.map(|v| String::from_utf8_lossy(&v).to_string()),
     })
 }
 
 async fn delete(State(state): State<AppState>, Json(req): Json<DeleteRequest>) -> Json<StatusResponse> {
     let mut engine = state.engine.write().unwrap();
-    KvApi::delete(&mut *engine, req.table_id, &req.key).unwrap();
+    KvApi::delete(&mut *engine, req.table_id, req.key.as_bytes()).unwrap();
     Json(StatusResponse { status: "ok".to_string() })
 }
 
 async fn scan(State(state): State<AppState>, Json(req): Json<ScanRequest>) -> Json<ScanResponse> {
     let mut engine = state.engine.write().unwrap();
-    let pairs = KvApi::scan(&mut *engine, req.table_id, &req.start, &req.end).unwrap();
+    let pairs = KvApi::scan(&mut *engine, req.table_id, req.start.as_bytes(), req.end.as_bytes()).unwrap();
     Json(ScanResponse {
-        pairs: pairs.into_iter().map(|(k, v)| KvPair { key: k, value: v }).collect(),
+        pairs: pairs.into_iter().map(|(k, v)| KvPair {
+            key: String::from_utf8_lossy(&k).to_string(),
+            value: String::from_utf8_lossy(&v).to_string(),
+        }).collect(),
     })
 }
 
 async fn batch_put(State(state): State<AppState>, Json(req): Json<BatchPutRequest>) -> Json<StatusResponse> {
     let mut engine = state.engine.write().unwrap();
-    let pairs: Vec<_> = req.pairs.into_iter().map(|p| (p.key, p.value)).collect();
+    let pairs: Vec<_> = req.pairs.into_iter()
+        .map(|p| (p.key.into_bytes(), p.value.into_bytes()))
+        .collect();
     KvApi::batch_put(&mut *engine, req.table_id, pairs).unwrap();
     Json(StatusResponse { status: "ok".to_string() })
 }
