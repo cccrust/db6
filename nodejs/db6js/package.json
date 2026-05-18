@@ -1,7 +1,7 @@
 {
-  "name": "db6js",
-  "version": "5.3.0",
-  "description": "Node.js client for db6 database with REST and WebSocket support",
+  "name": "db6nodejs",
+  "version": "5.4.0",
+  "description": "Node.js client for db6 database with REST support",
   "main": "src/index.js",
   "type": "module",
   "scripts": {

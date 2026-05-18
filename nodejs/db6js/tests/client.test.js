@@ -4,7 +4,7 @@ import { Client } from '../src/index.js';
 
 const DB_URL = 'http://localhost:50052';
 
-describe('db6js', () => {
+describe('db6nodejs', () => {
   let db;
 
   beforeEach(() => {

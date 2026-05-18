@@ -1,17 +1,17 @@
-# db6js
+# db6nodejs
 
-Node.js client for db6 database with REST and WebSocket support.
+Node.js client for db6 database with REST support.
 
 ## Installation
 
 ```bash
-npm install db6js
+npm install db6nodejs
 ```
 
 ## Quick Start
 
 ```javascript
-import { Client } from 'db6js';
+import { Client } from 'db6nodejs';
 
 // Create client
 const db = new Client('http://localhost:50052');
@@ -39,7 +39,6 @@ await db.delete(1, 'key');
 ### new Client(baseUrl, options?)
 
 - `baseUrl`: Base URL of db6 server (e.g., 'http://localhost:50052')
-- `options.useWebSocket`: Use WebSocket transport (default: false)
 
 ### Methods
 
