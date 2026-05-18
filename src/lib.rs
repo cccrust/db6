@@ -17,6 +17,7 @@ pub mod fts;
 pub mod kv;
 pub mod query;
 pub mod msgq;
+pub mod server;
 
 pub use engine::{EngineStats, StorageEngine, KvStore, CanOrderBy, CanJoin, CanFts, CanTransaction, CanScan, CanBatch};
 pub use kv::{KvStore as KvApi, KvEngine};

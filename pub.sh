@@ -1,18 +1,25 @@
 #!/bin/bash
 set -e
 
-if [ $# -ne 1 ]; then
-    echo "Usage: $0 <new_version>"
-    echo "Example: $0 4.14.0"
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+    echo "Usage: $0 <new_version> [commit_message]"
+    echo "Example: $0 5.3.0 \"Add WebSocket support\""
     exit 1
 fi
 
 NEW_VERSION="$1"
+COMMIT_MSG="${2:-}"
+
+if [ -n "$COMMIT_MSG" ]; then
+    COMMIT_MSG="v${NEW_VERSION}: ${COMMIT_MSG}"
+else
+    COMMIT_MSG="v${NEW_VERSION}"
+fi
 NAME="db6"
 
 # 驗證版本格式
 if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Error: version must be in format major.minor.patch (e.g. 4.14.0)"
+    echo "Error: version must be in format major.minor.patch (e.g. 5.3.0)"
     exit 1
 fi
 
@@ -36,17 +43,17 @@ else
 fi
 
 echo "=== Updating Cargo.toml version to $NEW_VERSION ==="
-sed -i "" "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
+awk -v v="$NEW_VERSION" '/^\[package\]/ { pkg=1 } pkg && /^version = / { sub(/version = "[^"]*"/, "version = \"" v "\""); pkg=0 } 1' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
 
 echo "=== Running tests ==="
 cargo test
 
 echo "=== Committing to git ==="
 git add -A
-git commit -m "v${NEW_VERSION}"
+git commit -m "$COMMIT_MSG"
 git push
 
 echo "=== Publishing to crates.io ==="
 cargo publish
 
-echo "=== v${NEW_VERSION} published successfully ==="
+echo "=== ${NEW_VERSION} published successfully ==="
