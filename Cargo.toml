@@ -1,6 +1,6 @@
 [package]
 name = "db6"
-version = "4.16.1"
+version = "5.0.0"
 edition = "2021"
 description = "Unified database with pluggable storage engines (Memory/BTree/LSM) (KV + SQL + FTS + Msgq) "
 license = "MIT"
@@ -9,6 +9,10 @@ repository = "https://github.com/cccrust/db6"
 [[bin]]
 name = "db6"
 path = "src/main.rs"
+
+[[bin]]
+name = "grpc-server"
+path = "src/grpc_server.rs"
 
 [dependencies]
 thiserror = "2.0"
@@ -19,9 +23,18 @@ zstd = "0.13"
 bincode = "1.3"
 memmap2 = "0.9"
 fastrand = "2.0"
-tokio = { version = "1.0", features = ["full"] }
 bytes = "1.0"
 futures = "0.3"
+tokio = { version = "1.0", features = ["full"] }
+tonic = "0.14"
+prost = "0.13"
+prost-types = "0.13"
+axum = "0.7"
+tower = "0.5"
 
 [dev-dependencies]
 tempfile = "3.14"
+
+[build-dependencies]
+tonic-build = "0.14"
+prost-build = "0.13"

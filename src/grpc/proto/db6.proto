@@ -1,0 +1,267 @@
+syntax = "proto3";
+
+package db6;
+
+service KvService {
+  rpc Put(PutRequest) returns (PutResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc Scan(ScanRequest) returns (ScanResponse);
+  rpc BatchPut(BatchPutRequest) returns (BatchPutResponse);
+  rpc RangeDelete(RangeDeleteRequest) returns (RangeDeleteResponse);
+  rpc Flush(FlushRequest) returns (FlushResponse);
+  rpc EngineStats(EngineStatsRequest) returns (EngineStatsResponse);
+}
+
+message PutRequest {
+  uint32 table_id = 1;
+  bytes key = 2;
+  bytes value = 3;
+}
+
+message PutResponse {}
+
+message GetRequest {
+  uint32 table_id = 1;
+  bytes key = 2;
+}
+
+message GetResponse {
+  bytes value = 1;
+  bool found = 2;
+}
+
+message DeleteRequest {
+  uint32 table_id = 1;
+  bytes key = 2;
+}
+
+message DeleteResponse {}
+
+message ScanRequest {
+  uint32 table_id = 1;
+  bytes start = 2;
+  bytes end = 3;
+}
+
+message ScanResponse {
+  repeated KvPair pairs = 1;
+}
+
+message KvPair {
+  bytes key = 1;
+  bytes value = 2;
+}
+
+message BatchPutRequest {
+  uint32 table_id = 1;
+  repeated KvPair pairs = 2;
+}
+
+message BatchPutResponse {}
+
+message RangeDeleteRequest {
+  uint32 table_id = 1;
+  bytes start = 2;
+  bytes end = 3;
+}
+
+message RangeDeleteResponse {}
+
+message FlushRequest {}
+
+message FlushResponse {}
+
+message EngineStatsRequest {}
+
+message EngineStatsResponse {
+  string engine_type = 1;
+  uint64 total_keys = 2;
+  uint64 total_size = 3;
+  uint64 hits = 4;
+  uint64 misses = 5;
+}
+
+service SqlService {
+  rpc Execute(SqlExecuteRequest) returns (SqlExecuteResponse);
+}
+
+message SqlExecuteRequest {
+  string sql = 1;
+  uint32 table_id = 2;
+}
+
+message SqlExecuteResponse {
+  repeated string columns = 1;
+  repeated SqlRow rows = 2;
+  uint64 affected = 3;
+  string error = 4;
+}
+
+message SqlRow {
+  repeated string values = 1;
+}
+
+service FtsService {
+  rpc Insert(FtsInsertRequest) returns (FtsInsertResponse);
+  rpc Search(FtsSearchRequest) returns (FtsSearchResponse);
+  rpc SearchBm25(FtsSearchRequest) returns (FtsBm25Response);
+  rpc SearchPrefix(FtsSearchRequest) returns (FtsSearchResponse);
+}
+
+message FtsInsertRequest {
+  uint64 doc_id = 1;
+  string text = 2;
+  uint32 table_id = 3;
+}
+
+message FtsInsertResponse {}
+
+message FtsSearchRequest {
+  string query = 1;
+  uint32 table_id = 2;
+}
+
+message FtsSearchResponse {
+  repeated uint64 doc_ids = 1;
+}
+
+message FtsBm25Response {
+  repeated Bm25Result results = 1;
+}
+
+message Bm25Result {
+  uint64 doc_id = 1;
+  double score = 2;
+}
+
+service MsgqService {
+  rpc QueueCreate(QueueCreateRequest) returns (QueueCreateResponse);
+  rpc QueueEnqueue(QueueEnqueueRequest) returns (QueueEnqueueResponse);
+  rpc QueueDequeue(QueueDequeueRequest) returns (QueueDequeueResponse);
+  rpc QueueAck(QueueAckRequest) returns (QueueAckResponse);
+  rpc QueueNack(QueueNackRequest) returns (QueueNackResponse);
+  rpc QueueStats(QueueStatsRequest) returns (QueueStatsResponse);
+  rpc QueueLength(QueueLengthRequest) returns (QueueLengthResponse);
+  rpc QueuePurge(QueuePurgeRequest) returns (QueuePurgeResponse);
+
+  rpc PubSubCreate(PubSubCreateRequest) returns (PubSubCreateResponse);
+  rpc PubSubPublish(PubSubPublishRequest) returns (PubSubPublishResponse);
+  rpc PubSubSubscribe(PubSubSubscribeRequest) returns (stream PubSubMessage);
+  rpc ListQueues(ListQueuesRequest) returns (ListQueuesResponse);
+}
+
+message QueueCreateRequest {
+  string name = 1;
+}
+
+message QueueCreateResponse {}
+
+message QueueEnqueueRequest {
+  string queue_name = 1;
+  bytes payload = 2;
+  int32 visibility_timeout = 3;
+}
+
+message QueueEnqueueResponse {
+  string id = 1;
+}
+
+message QueueDequeueRequest {
+  string queue_name = 1;
+  int32 wait_timeout = 2;
+}
+
+message QueueDequeueResponse {
+  string id = 1;
+  bytes payload = 2;
+  uint32 delivery_count = 3;
+}
+
+message QueueAckRequest {
+  string queue_name = 1;
+  string id = 2;
+}
+
+message QueueAckResponse {}
+
+message QueueNackRequest {
+  string queue_name = 1;
+  string id = 2;
+}
+
+message QueueNackResponse {}
+
+message QueueStatsRequest {
+  string queue_name = 1;
+}
+
+message QueueStatsResponse {
+  string name = 1;
+  uint64 length = 2;
+  uint64 total_enqueued = 3;
+  uint64 completed = 4;
+  uint64 nacked = 5;
+}
+
+message QueueLengthRequest {
+  string queue_name = 1;
+}
+
+message QueueLengthResponse {
+  uint64 length = 1;
+}
+
+message QueuePurgeRequest {
+  string queue_name = 1;
+}
+
+message QueuePurgeResponse {}
+
+message PubSubCreateRequest {
+  string name = 1;
+}
+
+message PubSubCreateResponse {}
+
+message PubSubPublishRequest {
+  string channel = 1;
+  bytes payload = 2;
+}
+
+message PubSubPublishResponse {
+  string id = 1;
+}
+
+message PubSubSubscribeRequest {
+  string channel = 1;
+  string subscriber_id = 2;
+}
+
+message PubSubMessage {
+  string id = 1;
+  bytes payload = 2;
+}
+
+message ListQueuesRequest {}
+
+message ListQueuesResponse {
+  repeated string names = 1;
+}
+
+service HealthService {
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc Watch(HealthCheckRequest) returns (stream HealthCheckResponse);
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  HealthStatus status = 1;
+}
+
+enum HealthStatus {
+  UNKNOWN = 0;
+  SERVING = 1;
+  NOT_SERVING = 2;
+}
