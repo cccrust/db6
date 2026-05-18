@@ -86,14 +86,14 @@ impl FtsTokenizer for EnglishTokenizer {
 /// FTS index — an inverted index stored via the KV interface
 ///
 /// The generic parameter E can be any engine implementing StorageEngine.
-pub struct FtsIndex<E: StorageEngine> {
-    engine: E,
+pub struct FtsIndex<'a, E: StorageEngine> {
+    engine: &'a mut E,
     doc_count: u64,
 }
 
-impl<E: StorageEngine> FtsIndex<E> {
+impl<'a, E: StorageEngine> FtsIndex<'a, E> {
     /// Create a new FTS index
-    pub fn new(engine: E) -> Self {
+    pub fn new(engine: &'a mut E) -> Self {
         Self {
             engine,
             doc_count: 0,
@@ -445,8 +445,8 @@ mod tests {
 
     #[test]
     fn test_fts_basic() {
-        let engine = HashMemoryEngine::new();
-        let mut index = super::FtsIndex::new(engine);
+        let mut engine = HashMemoryEngine::new();
+        let mut index = super::FtsIndex::new(&mut engine);
         
         index.insert(1, "Hello World").unwrap();
         index.insert(2, "資料庫系統").unwrap();
@@ -460,8 +460,8 @@ mod tests {
 
     #[test]
     fn test_fts_prefix() {
-        let engine = HashMemoryEngine::new();
-        let mut index = super::FtsIndex::new(engine);
+        let mut engine = HashMemoryEngine::new();
+        let mut index = super::FtsIndex::new(&mut engine);
         
         index.insert(1, "資料庫").unwrap();
         index.insert(2, "資料結構").unwrap();
@@ -474,8 +474,8 @@ mod tests {
 
     #[test]
     fn test_fts_boolean_and() {
-        let engine = HashMemoryEngine::new();
-        let mut index = super::FtsIndex::new(engine);
+        let mut engine = HashMemoryEngine::new();
+        let mut index = super::FtsIndex::new(&mut engine);
         
         index.insert(1, "Hello World").unwrap();
         index.insert(2, "Hello Rust").unwrap();
@@ -487,8 +487,8 @@ mod tests {
 
     #[test]
     fn test_fts_boolean_not() {
-        let engine = HashMemoryEngine::new();
-        let mut index = super::FtsIndex::new(engine);
+        let mut engine = HashMemoryEngine::new();
+        let mut index = super::FtsIndex::new(&mut engine);
         
         index.insert(1, "Hello World").unwrap();
         index.insert(2, "Hello Rust").unwrap();
@@ -501,8 +501,8 @@ mod tests {
 
     #[test]
     fn test_fts_bm25() {
-        let engine = HashMemoryEngine::new();
-        let mut index = super::FtsIndex::new(engine);
+        let mut engine = HashMemoryEngine::new();
+        let mut index = super::FtsIndex::new(&mut engine);
         
         index.insert(1, "hello world").unwrap();
         index.insert(2, "hello hello world").unwrap();
@@ -519,8 +519,8 @@ mod tests {
     fn test_fts_with_kv_engine() {
         use crate::kv::KvEngine;
         
-        let engine = KvEngine::new("memory").unwrap();
-        let mut index = super::FtsIndex::new(engine);
+        let mut engine = KvEngine::new("memory").unwrap();
+        let mut index = super::FtsIndex::new(&mut engine);
         
         index.insert(1, "Hello World").unwrap();
         index.insert(2, "資料庫系統").unwrap();

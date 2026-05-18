@@ -111,6 +111,53 @@ res.on('end', () => {
     });
   }
 
+  async executeSql(sql) {
+    return await this._request('POST', '/sql/execute', { sql });
+  }
+
+  async ftsInsert(docId, text) {
+    await this._request('POST', '/fts/insert', { doc_id: docId, text });
+  }
+
+  async ftsSearch(query) {
+    const result = await this._request('POST', '/fts/search', { query });
+    return result.doc_ids || [];
+  }
+
+  async ftsSearchBm25(query) {
+    const result = await this._request('POST', '/fts/search_bm25', { query });
+    return result.results || [];
+  }
+
+  async queueCreate(name) {
+    await this._request('POST', '/queue/create', { name });
+  }
+
+  async queueEnqueue(name, payload, timeout = 30) {
+    return await this._request('POST', '/queue/enqueue', { name, payload, timeout });
+  }
+
+  async queueDequeue(name, waitTimeout = 0) {
+    return await this._request('POST', '/queue/dequeue', { name, wait_timeout: waitTimeout });
+  }
+
+  async queueAck(name, msgId) {
+    await this._request('POST', '/queue/ack', { name, msg_id: msgId });
+  }
+
+  async queueStats(name) {
+    return await this._request('POST', '/queue/stats', { name });
+  }
+
+  async queueList() {
+    const result = await this._request('GET', '/queue/list');
+    return result.queues || [];
+  }
+
+  async pubsubPublish(channel, payload) {
+    return await this._request('POST', '/pubsub/publish', { channel, payload });
+  }
+
   async close() {
     if (this._ws) {
       this._ws.close();

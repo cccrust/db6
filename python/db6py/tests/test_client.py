@@ -60,3 +60,46 @@ class TestStats:
         assert "key_count" in stats
         assert "engine" in stats
         assert "size_bytes" in stats
+
+
+class TestSql:
+    def test_execute_sql(self, db):
+        result = db.execute_sql("SELECT 1 as id, 'hello' as name")
+        assert result is not None
+        assert "columns" in result
+        assert "rows" in result
+
+
+class TestFts:
+    def test_fts_insert_search(self, db):
+        db.fts_insert(1, "Hello world")
+        db.fts_insert(2, "資料庫系統")
+        doc_ids = db.fts_search("Hello")
+        assert 1 in doc_ids
+
+    def test_fts_search_chinese(self, db):
+        db.fts_insert(10, "資料庫系統")
+        doc_ids = db.fts_search("資料庫")
+        assert 10 in doc_ids
+
+    def test_fts_search_bm25(self, db):
+        db.fts_insert(20, "hello world database")
+        db.fts_insert(21, "hello hello database database")
+        results = db.fts_search_bm25("hello database")
+        assert results is not None
+        assert isinstance(results, list)
+
+
+class TestQueue:
+    def test_queue_operations(self, db):
+        queue_name = "test_queue_py"
+        db.queue_create(queue_name)
+        result = db.queue_enqueue(queue_name, "test_payload", 30)
+        assert result is not None
+        assert "msg_id" in result or "status" in result
+
+
+class TestPubSub:
+    def test_pubsub_publish(self, db):
+        result = db.pubsub_publish("test_channel", "test_message")
+        assert result is not None

@@ -62,4 +62,44 @@ describe('db6nodejs', () => {
     assert.ok('engine' in stats);
     assert.ok('size_bytes' in stats);
   });
+
+  test('execute sql', async () => {
+    const result = await db.executeSql('SELECT 1 as id, "hello" as name');
+    assert.ok(result);
+    assert.ok('columns' in result);
+    assert.ok('rows' in result);
+  });
+
+  test('fts insert and search', async () => {
+    await db.ftsInsert(1, 'Hello world');
+    await db.ftsInsert(2, '資料庫系統');
+    const docIds = await db.ftsSearch('Hello');
+    assert.ok(docIds.includes(1));
+  });
+
+  test('fts search chinese', async () => {
+    await db.ftsInsert(10, '資料庫系統');
+    const docIds = await db.ftsSearch('資料庫');
+    assert.ok(docIds.includes(10));
+  });
+
+  test('fts search bm25', async () => {
+    await db.ftsInsert(20, 'hello world database');
+    await db.ftsInsert(21, 'hello hello database database');
+    const results = await db.ftsSearchBm25('hello database');
+    assert.ok(Array.isArray(results));
+  });
+
+  test('queue operations', async () => {
+    const queueName = 'test_queue_js';
+    await db.queueCreate(queueName);
+    const result = await db.queueEnqueue(queueName, 'test_payload', 30);
+    assert.ok(result);
+    assert.ok('msg_id' in result || 'status' in result);
+  });
+
+  test('pubsub publish', async () => {
+    const result = await db.pubsubPublish('test_channel', 'test_message');
+    assert.ok(result);
+  });
 });

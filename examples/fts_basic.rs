@@ -8,10 +8,10 @@ fn main() {
     println!("=== FTS Basic Example ===\n");
 
     // 建立引擎
-    let engine = HashMemoryEngine::new();
+    let mut engine = HashMemoryEngine::new();
 
     // 建立 FTS 索引
-    let mut fts = FtsIndex::new(engine);
+    let mut fts = FtsIndex::new(&mut engine);
 
     // 加入文件
     fts.insert(1, "Hello world").unwrap();
