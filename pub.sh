@@ -49,7 +49,7 @@ echo "=== Updating db6py version to $NEW_VERSION ==="
 awk -v v="$NEW_VERSION" '/^version = / { sub(/version = "[^"]*"/, "version = \"" v "\"") } 1' python/db6py/pyproject.toml > python/db6py/pyproject.toml.tmp && mv python/db6py/pyproject.toml.tmp python/db6py/pyproject.toml
 
 echo "=== Updating db6nodejs version to $NEW_VERSION ==="
-awk -v v="$NEW_VERSION" '/^  \"version\"/ { sub(/\"[^\"]*\"$/, "\"" v "\"") } 1' nodejs/db6nodejs/package.json > nodejs/db6nodejs/package.json.tmp && mv nodejs/db6nodejs/package.json.tmp nodejs/db6nodejs/package.json
+awk -v v="$NEW_VERSION" '/^  "version"/ { sub(/"[0-9]+\.[0-9]+\.[0-9]+"/, "\"" v "\"") } 1' nodejs/db6nodejs/package.json > nodejs/db6nodejs/package.json.tmp && mv nodejs/db6nodejs/package.json.tmp nodejs/db6nodejs/package.json
 
 echo "=== Running tests ==="
 cargo test

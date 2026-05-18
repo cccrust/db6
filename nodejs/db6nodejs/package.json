@@ -1,6 +1,6 @@
 {
   "name": "db6nodejs",
-  "version": "5.4.0",
+  "version": "5.4.7",
   "description": "Node.js client for db6 database with REST support",
   "main": "src/index.js",
   "type": "module",
