@@ -19,8 +19,8 @@ for i in {1..10}; do
     sleep 1
 done
 
-cd nodejs/db6js
-echo "Installing db6js..."
+cd nodejs/db6nodejs
+echo "Installing db6nodejs..."
 npm install
 
 echo "Running tests..."

@@ -1,10 +1,6 @@
-#!/bin/bash
 set -x
-
-echo "=== Building db6 ==="
-cargo build
-
-echo "=== Running tests ==="
-cargo test
-
-echo "=== Test complete ==="
+./rutest.sh
+./pytest.sh
+./jstest.sh
+# ./test_examples.sh
+# ./test_server.sh

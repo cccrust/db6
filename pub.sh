@@ -48,8 +48,8 @@ awk -v v="$NEW_VERSION" '/^\[package\]/ { pkg=1 } pkg && /^version = / { sub(/ve
 echo "=== Updating db6py version to $NEW_VERSION ==="
 awk -v v="$NEW_VERSION" '/^version = / { sub(/version = "[^"]*"/, "version = \"" v "\"") } 1' python/db6py/pyproject.toml > python/db6py/pyproject.toml.tmp && mv python/db6py/pyproject.toml.tmp python/db6py/pyproject.toml
 
-echo "=== Updating db6js version to $NEW_VERSION ==="
-awk -v v="$NEW_VERSION" '/^  \"version\"/ { sub(/\"[^\"]*\"$/, "\"" v "\"") } 1' nodejs/db6js/package.json > nodejs/db6js/package.json.tmp && mv nodejs/db6js/package.json.tmp nodejs/db6js/package.json
+echo "=== Updating db6nodejs version to $NEW_VERSION ==="
+awk -v v="$NEW_VERSION" '/^  \"version\"/ { sub(/\"[^\"]*\"$/, "\"" v "\"") } 1' nodejs/db6nodejs/package.json > nodejs/db6nodejs/package.json.tmp && mv nodejs/db6nodejs/package.json.tmp nodejs/db6nodejs/package.json
 
 echo "=== Running tests ==="
 cargo test
@@ -65,7 +65,7 @@ cargo publish
 echo "=== Publishing db6py to PyPI ==="
 ./python/db6py/pub.sh
 
-echo "=== Publishing db6js to npm ==="
-./nodejs/db6js/pub.sh
+echo "=== Publishing db6nodejs to npm ==="
+./nodejs/db6nodejs/pub.sh
 
 echo "=== ${NEW_VERSION} published successfully ==="
