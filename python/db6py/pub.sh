@@ -9,14 +9,15 @@ echo "Publishing db6py v$VERSION to PyPI..."
 # Clean
 rm -rf dist/ build/ *.egg-info
 
+# Install build tools
+uv pip install build twine
+
 # Build
 echo "Building..."
-uv pip install build
-uv run build
+python3 -m build
 
 # Upload to PyPI
 echo "Uploading to PyPI..."
-uv pip install twine
-uv run twine upload dist/*
+python3 -m twine upload dist/*
 
 echo "Published db6py v$VERSION to PyPI!"

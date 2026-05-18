@@ -222,7 +222,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
 name = "db6"
-version = "5.3.0"
+version = "5.3.1"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
