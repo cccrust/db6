@@ -3,7 +3,13 @@ set -e
 
 cd "$(dirname "$0")"
 
-VERSION=$(node -p "require('./package.json').version")
+if [ -n "$1" ]; then
+    VERSION="$1"
+    node -e "const pkg=require('./package.json'); pkg.version='$VERSION'; require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2)+'\n');"
+    echo "Version updated to v$VERSION"
+else
+    VERSION=$(grep '^  "version":' package.json | sed 's/.*"version": "\(.*\)".*/\1/')
+fi
 echo "Publishing db6nodejs v$VERSION to npm..."
 
 # Clean

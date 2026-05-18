@@ -1,6 +1,6 @@
 [package]
 name = "db6"
-version = "5.4.5"
+version = "5.4.6"
 edition = "2021"
 description = "Unified database with pluggable storage engines (Memory/BTree/LSM) (KV + SQL + FTS + Msgq) "
 license = "MIT"
