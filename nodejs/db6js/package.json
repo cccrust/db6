@@ -1,0 +1,20 @@
+{
+  "name": "db6js",
+  "version": "5.3.0",
+  "description": "Node.js client for db6 database with REST and WebSocket support",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "pub": "npm publish"
+  },
+  "keywords": ["database", "kv-store", "db6"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
